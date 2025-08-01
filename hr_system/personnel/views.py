@@ -17,6 +17,26 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import HttpResponse
 
+
+def _gather_descendant_ids(root_division):
+    """
+    Простой BFS для сбора всех потомков. Можно заменить на рекурсивный CTE
+    или использовать специализированную библиотеку (django-mptt/treebeard)
+    для лучшей производительности на глубоких деревьях.
+    """
+    descendant_ids = [root_division.id]
+    queue = [root_division]
+    visited = {root_division.id}
+    while queue:
+        current = queue.pop(0)
+        for child in current.child_divisions.all():
+            if child.id not in visited:
+                descendant_ids.append(child.id)
+                visited.add(child.id)
+                queue.append(child)
+    return descendant_ids
+
+
 class DivisionViewSet(viewsets.ModelViewSet):
     serializer_class = DivisionSerializer
     permission_classes = [IsRole4 | (IsReadOnly & (IsRole1 | IsRole2 | IsRole3 | IsRole5 | IsRole6))]
@@ -26,31 +46,32 @@ class DivisionViewSet(viewsets.ModelViewSet):
         if not user.is_authenticated or not hasattr(user, 'profile'):
             return Division.objects.none()
         profile = user.profile
+
+        # ROLE_1 и ROLE_4 видят все
         if profile.role in [UserRole.ROLE_1, UserRole.ROLE_4]:
             return Division.objects.all().prefetch_related("child_divisions")
+
         assigned_division = profile.division_assignment
         if not assigned_division:
             return Division.objects.none()
-        if profile.role in [UserRole.ROLE_2, UserRole.ROLE_5]:
-            descendant_ids = [assigned_division.id]
-            # Fetch descendants only if the flag is set for Role 5, or always for Role 2
-            fetch_children = (profile.role == UserRole.ROLE_2) or \
-                             (profile.role == UserRole.ROLE_5 and profile.include_child_divisions)
 
-            if fetch_children:
-                queue = [assigned_division]
-                visited = {assigned_division.id}
-                while queue:
-                    current_division = queue.pop(0)
-                    for child in current_division.child_divisions.all():
-                        if child.id not in visited:
-                            descendant_ids.append(child.id)
-                            visited.add(child.id)
-                            queue.append(child)
-
+        # ROLE_2 всегда включает потомков
+        if profile.role == UserRole.ROLE_2:
+            descendant_ids = _gather_descendant_ids(assigned_division)
             return Division.objects.filter(id__in=descendant_ids).prefetch_related("child_divisions")
+
+        # ROLE_5 — только если флаг
+        if profile.role == UserRole.ROLE_5:
+            if getattr(profile, 'include_child_divisions', False):
+                descendant_ids = _gather_descendant_ids(assigned_division)
+                return Division.objects.filter(id__in=descendant_ids).prefetch_related("child_divisions")
+            else:
+                return Division.objects.filter(id=assigned_division.id).prefetch_related("child_divisions")
+
+        # ROLE_3 и ROLE_6 — только своё подразделение
         if profile.role in [UserRole.ROLE_3, UserRole.ROLE_6]:
             return Division.objects.filter(id=assigned_division.id).prefetch_related("child_divisions")
+
         return Division.objects.none()
 
     @action(detail=True, methods=['post'], url_path='update-statuses', permission_classes=[IsRole4 | IsRole3 | IsRole6])
@@ -59,7 +80,7 @@ class DivisionViewSet(viewsets.ModelViewSet):
         profile = getattr(request.user, 'profile', None)
 
         if not (profile and (profile.role == UserRole.ROLE_4 or (profile.role in [UserRole.ROLE_3, UserRole.ROLE_6] and profile.division_assignment == division))):
-             return Response({'error': 'You do not have permission to update statuses for this division.'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'error': 'You do not have permission to update statuses for this division.'}, status=status.HTTP_403_FORBIDDEN)
 
         item_serializer = StatusUpdateItemSerializer(data=request.data, many=True)
         if not item_serializer.is_valid():
@@ -115,6 +136,7 @@ class PositionViewSet(viewsets.ModelViewSet):
     serializer_class = PositionSerializer
     permission_classes = [IsRole4 | (IsReadOnly & permissions.IsAuthenticated)]
 
+
 class EmployeeViewSet(viewsets.ModelViewSet):
     serializer_class = EmployeeSerializer
     permission_classes = [IsRole4 | IsRole5 | (IsReadOnly & (IsRole1 | IsRole2 | IsRole3 | IsRole6))]
@@ -124,10 +146,12 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         if not user.is_authenticated or not hasattr(user, 'profile'):
             return Employee.objects.none()
 
-        # Base queryset with ordering
-        base_queryset = Employee.objects.select_related("position", "division").order_by('position__level', 'full_name')
+        base_queryset = Employee.objects.select_related("position", "division").order_by(
+            'position__level', 'full_name'
+        )
 
         profile = user.profile
+
         if profile.role in [UserRole.ROLE_1, UserRole.ROLE_4]:
             return base_queryset.all()
 
@@ -135,32 +159,24 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         if not assigned_division:
             return Employee.objects.none()
 
-        descendant_ids = [assigned_division.id]
-        # For roles 2 and 5, fetch descendants only if the flag is set
-        fetch_children = (profile.role == UserRole.ROLE_2) or \
-                         (profile.role == UserRole.ROLE_5 and profile.include_child_divisions)
+        # ROLE_2: всегда включает дочерние подразделения
+        # ROLE_5: включает только если include_child_divisions == True
+        if profile.role == UserRole.ROLE_2 or (profile.role == UserRole.ROLE_5 and getattr(profile, 'include_child_divisions', False)):
+            descendant_ids = _gather_descendant_ids(assigned_division)
+            return base_queryset.filter(division__id__in=descendant_ids)
 
-        if fetch_children:
-            # A more efficient way to get all descendant IDs
-            queue = [assigned_division]
-            visited = {assigned_division.id}
-            while queue:
-                current_division = queue.pop(0)
-                # We need to fetch children for the current division in the queue
-                # Note: This can still be slow for very deep hierarchies.
-                # A recursive CTE would be the most performant solution.
-                for child in current_division.child_divisions.all():
-                    if child.id not in visited:
-                        descendant_ids.append(child.id)
-                        visited.add(child.id)
-                        queue.append(child)
+        # ROLE_3 и ROLE_6 — только своё подразделение
+        if profile.role in [UserRole.ROLE_3, UserRole.ROLE_6]:
+            return base_queryset.filter(division__id=assigned_division.id)
 
-        return base_queryset.filter(division__id__in=descendant_ids)
+        return Employee.objects.none()
+
 
 class UserProfileViewSet(viewsets.ModelViewSet):
     queryset = UserProfile.objects.all().select_related("user", "division_assignment")
     serializer_class = UserProfileSerializer
     permission_classes = [IsRole4]
+
 
 class MyTokenObtainPairView(OriginalTokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
