@@ -92,13 +92,20 @@ class EmployeeStatusLog(models.Model):
     date_from = models.DateField()
     date_to = models.DateField(null=True, blank=True)  # Can be ongoing
     comment = models.TextField(null=True, blank=True)
-    # For secondments, we might need to link to the target/source division
     secondment_division = models.ForeignKey(
         Division,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
         related_name="seconded_employees_log_entries",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+    created_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="created_status_logs",
     )
 
     def __str__(self):

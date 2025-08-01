@@ -1,7 +1,7 @@
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 from rest_framework import status
-from .models import Position, Division, Employee, UserProfile, UserRole, DivisionType, EmployeeStatusType
+from .models import Position, Division, Employee, UserProfile, UserRole, DivisionType, EmployeeStatusType, EmployeeStatusLog
 
 class PermissionsTest(APITestCase):
     def setUp(self):
@@ -78,3 +78,35 @@ class PermissionsTest(APITestCase):
         # Cannot create employee outside their department
         response = self.client.post('/api/personnel/employees/', {'full_name': 'New by HR Invalid', 'position_id': self.pos1.id, 'division_id': self.dep2.id})
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+
+class StatusUpdateTest(APITestCase):
+    def setUp(self):
+        self.company = Division.objects.create(name="Company", division_type=DivisionType.COMPANY)
+        self.dep1 = Division.objects.create(name="Department 1", division_type=DivisionType.DEPARTMENT, parent_division=self.company)
+        self.man1_dep1 = Division.objects.create(name="Management 1.1", division_type=DivisionType.MANAGEMENT, parent_division=self.dep1)
+        self.pos1 = Position.objects.create(name="Manager", level=10)
+        self.emp1 = Employee.objects.create(full_name="Emp1", position=self.pos1, division=self.man1_dep1)
+        self.emp2 = Employee.objects.create(full_name="Emp2", position=self.pos1, division=self.man1_dep1)
+        self.user_role3 = User.objects.create_user(username='user_role3', password='password')
+        UserProfile.objects.create(user=self.user_role3, role=UserRole.ROLE_3, division_assignment=self.man1_dep1)
+
+    def test_successful_status_update(self):
+        self.client.force_authenticate(user=self.user_role3)
+        url = f'/api/personnel/divisions/{self.man1_dep1.id}/update-statuses/'
+        data = [
+            {'employee_id': self.emp1.id, 'status': 'ON_LEAVE', 'date_from': '2025-01-01', 'date_to': '2025-01-10'},
+            {'employee_id': self.emp2.id, 'status': 'SICK_LEAVE', 'date_from': '2025-01-05'}
+        ]
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(EmployeeStatusLog.objects.count(), 2)
+        self.assertEqual(EmployeeStatusLog.objects.get(employee=self.emp1).status, 'ON_LEAVE')
+
+    def test_unauthorized_status_update(self):
+        user_unauthorized = User.objects.create_user(username='unauthorized', password='password')
+        UserProfile.objects.create(user=user_unauthorized, role=UserRole.ROLE_2, division_assignment=self.dep1)
+        self.client.force_authenticate(user=user_unauthorized)
+        url = f'/api/personnel/divisions/{self.man1_dep1.id}/update-statuses/'
+        data = [{'employee_id': self.emp1.id, 'status': 'ON_LEAVE', 'date_from': '2025-01-01'}]
+        response = self.client.post(url, data, format='json')
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)

@@ -8,6 +8,7 @@ from .models import (
     EmployeeStatusLog,
     DivisionType,
     UserRole,
+    EmployeeStatusType,
 )
 from rest_framework_simplejwt.serializers import (
     TokenObtainPairSerializer,
@@ -132,13 +133,40 @@ class EmployeeSerializer(serializers.ModelSerializer):
         return data
 
 
-# EmployeeStatusLog might be handled by specific actions rather than generic CRUD
-# class EmployeeStatusLogSerializer(serializers.ModelSerializer):
-#     employee_id = serializers.PrimaryKeyRelatedField(queryset=Employee.objects.all(), source='employee')
-#     status_display = serializers.CharField(source='get_status_display', read_only=True)
-#     class Meta:
-#         model = EmployeeStatusLog
-#         fields = ['id', 'employee_id', 'status', 'status_display', 'date_from', 'date_to', 'comment', 'secondment_division']
+class EmployeeStatusLogSerializer(serializers.ModelSerializer):
+    employee_id = serializers.PrimaryKeyRelatedField(
+        queryset=Employee.objects.all(), source="employee"
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    created_by = UserSerializer(read_only=True)
+
+    class Meta:
+        model = EmployeeStatusLog
+        fields = [
+            "id",
+            "employee_id",
+            "status",
+            "status_display",
+            "date_from",
+            "date_to",
+            "comment",
+            "secondment_division",
+            "created_at",
+            "created_by",
+        ]
+        read_only_fields = ("created_at", "created_by")
+
+    def create(self, validated_data):
+        validated_data["created_by"] = self.context["request"].user
+        return super().create(validated_data)
+
+
+class StatusUpdateItemSerializer(serializers.Serializer):
+    employee_id = serializers.IntegerField()
+    status = serializers.ChoiceField(choices=EmployeeStatusType.choices)
+    date_from = serializers.DateField()
+    date_to = serializers.DateField(required=False, allow_null=True)
+    comment = serializers.CharField(required=False, allow_blank=True)
 
 
 # Custom Token Serializer for JWT claims (appended by subtask)

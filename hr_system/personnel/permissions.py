@@ -1,5 +1,5 @@
 from rest_framework.permissions import BasePermission, SAFE_METHODS
-from .models import UserRole, Employee, EmployeeStatusType, DivisionType
+from .models import UserRole, Employee, EmployeeStatusType, DivisionType, Division
 
 class IsReadOnly(BasePermission):
     """
