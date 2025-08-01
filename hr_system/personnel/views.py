@@ -88,20 +88,29 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if not user.is_authenticated or not hasattr(user, 'profile'):
             return Employee.objects.none()
+
+        # Base queryset with ordering
+        base_queryset = Employee.objects.select_related("position", "division").order_by('position__level', 'full_name')
+
         profile = user.profile
         if profile.role in [UserRole.ROLE_1, UserRole.ROLE_4]:
-            return Employee.objects.all().select_related("position", "division")
+            return base_queryset.all()
+
         assigned_division = profile.division_assignment
         if not assigned_division:
             return Employee.objects.none()
+
         descendant_ids = [assigned_division.id]
-        if profile.role in [UserRole.ROLE_2, UserRole.ROLE_5]:
+        # For roles 2 and 5, include child divisions if specified
+        if profile.role in [UserRole.ROLE_2, UserRole.ROLE_5] and profile.include_child_divisions:
             children = list(assigned_division.child_divisions.all())
             while children:
                 child = children.pop()
                 descendant_ids.append(child.id)
+                # This could be optimized to avoid N+1 queries if depth is large
                 children.extend(list(child.child_divisions.all()))
-        return Employee.objects.filter(division__id__in=descendant_ids).select_related("position", "division")
+
+        return base_queryset.filter(division__id__in=descendant_ids)
 
 class UserProfileViewSet(viewsets.ModelViewSet):
     queryset = UserProfile.objects.all().select_related("user", "division_assignment")
