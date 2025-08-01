@@ -82,7 +82,8 @@ class DivisionEmployeeAPITest(APITestCase):
         response = self.client.put(url, data, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("children as its parent", response.data['non_field_errors'][0])
+        # Expect an error about setting a child as its own parent / cyclical relationship
+        self.assertIn("children as its parent", response.data.get('non_field_errors', [''])[0])
 
     def test_prevent_deleting_division_with_children(self):
         """
@@ -95,7 +96,7 @@ class DivisionEmployeeAPITest(APITestCase):
         response = self.client.delete(url)
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("has child divisions", response.data['error'])
+        self.assertIn("has child divisions", response.data.get('error', ''))
 
     def test_prevent_deleting_division_with_employees(self):
         """
@@ -107,26 +108,35 @@ class DivisionEmployeeAPITest(APITestCase):
         url = f'/api/personnel/divisions/{div_with_emp.id}/'
         response = self.client.delete(url)
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("has employees assigned", response.data['error'])
-        self.assertIn("has employees assigned", response.data['error'])
+        self.assertIn("has employees assigned", response.data.get('error', ''))
 
     def test_employee_list_is_sorted_by_position_level(self):
         """
         Ensure the employee list is sorted by position level (hierarchy).
         """
+        # Create positions with different levels
         senior_position = Position.objects.create(name="Старший", level=10)
         junior_position = Position.objects.create(name="Младший", level=20)
+
+        # Create employees in a non-alphabetical, non-chronологическом order
         employee_junior = Employee.objects.create(full_name="Боб Младший", position=junior_position, division=self.division)
         employee_senior = Employee.objects.create(full_name="Алиса Старшая", position=senior_position, division=self.division)
 
+        # Fetch the list of employees
         url = '/api/personnel/employees/'
         response = self.client.get(url, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        names_in_response = [emp['full_name'] for emp in response.data['results']]
+
+        results = response.data.get('results', [])
+        self.assertGreaterEqual(len(results), 2)
+
+        names_in_response = [emp['full_name'] for emp in results]
         senior_index = names_in_response.index(employee_senior.full_name)
         junior_index = names_in_response.index(employee_junior.full_name)
-        self.assertLess(senior_index, junior_index, "Senior employee should appear before junior employee.")
+
+        # Assert that the senior employee appears before the junior one
+        self.assertLess(senior_index, junior_index, "Senior employee should appear before junior employee in the list.")
 
     def test_employee_crud_lifecycle(self):
         """
