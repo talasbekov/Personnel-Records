@@ -8,6 +8,7 @@ from .models import (
     EmployeeStatusLog,
     DivisionType,
     UserRole,
+    EmployeeStatusType,
 )
 from rest_framework_simplejwt.serializers import (
     TokenObtainPairSerializer,
@@ -92,12 +93,8 @@ class EmployeeSerializer(serializers.ModelSerializer):
     division_id = serializers.PrimaryKeyRelatedField(
         queryset=Division.objects.all(), source="division"
     )
-    # user_id = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), source='user', allow_null=True, required=False)
-
-    # To make position and division more readable in GET requests
     position = PositionSerializer(read_only=True)
     division = DivisionSerializer(read_only=True)
-    # user = UserSerializer(read_only=True, allow_null=True)
 
     class Meta:
         model = Employee
@@ -109,18 +106,67 @@ class EmployeeSerializer(serializers.ModelSerializer):
             "position",
             "division_id",
             "division",
-            # 'user_id', 'user'
         ]
-        # depth = 1 # Alternative to nested serializers for read-only
+
+    def validate(self, data):
+        user = self.context['request'].user
+        if not user.is_authenticated or not hasattr(user, 'profile'):
+            raise serializers.ValidationError("User profile not found.")
+
+        profile = user.profile
+        if profile.role == UserRole.ROLE_5:
+            assigned_division = profile.division_assignment
+            target_division = data.get('division')
+
+            if not assigned_division or not target_division:
+                raise serializers.ValidationError("Assigned division or target division is missing.")
+
+            # Check if target_division is within the scope of assigned_division
+            current = target_division
+            while current:
+                if current == assigned_division:
+                    return data
+                current = current.parent_division
+
+            raise serializers.ValidationError("You do not have permission to create an employee in this division.")
+
+        return data
 
 
-# EmployeeStatusLog might be handled by specific actions rather than generic CRUD
-# class EmployeeStatusLogSerializer(serializers.ModelSerializer):
-#     employee_id = serializers.PrimaryKeyRelatedField(queryset=Employee.objects.all(), source='employee')
-#     status_display = serializers.CharField(source='get_status_display', read_only=True)
-#     class Meta:
-#         model = EmployeeStatusLog
-#         fields = ['id', 'employee_id', 'status', 'status_display', 'date_from', 'date_to', 'comment', 'secondment_division']
+class EmployeeStatusLogSerializer(serializers.ModelSerializer):
+    employee_id = serializers.PrimaryKeyRelatedField(
+        queryset=Employee.objects.all(), source="employee"
+    )
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    created_by = UserSerializer(read_only=True)
+
+    class Meta:
+        model = EmployeeStatusLog
+        fields = [
+            "id",
+            "employee_id",
+            "status",
+            "status_display",
+            "date_from",
+            "date_to",
+            "comment",
+            "secondment_division",
+            "created_at",
+            "created_by",
+        ]
+        read_only_fields = ("created_at", "created_by")
+
+    def create(self, validated_data):
+        validated_data["created_by"] = self.context["request"].user
+        return super().create(validated_data)
+
+
+class StatusUpdateItemSerializer(serializers.Serializer):
+    employee_id = serializers.IntegerField()
+    status = serializers.ChoiceField(choices=EmployeeStatusType.choices)
+    date_from = serializers.DateField()
+    date_to = serializers.DateField(required=False, allow_null=True)
+    comment = serializers.CharField(required=False, allow_blank=True)
 
 
 # Custom Token Serializer for JWT claims (appended by subtask)

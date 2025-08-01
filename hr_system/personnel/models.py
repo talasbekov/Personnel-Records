@@ -92,13 +92,20 @@ class EmployeeStatusLog(models.Model):
     date_from = models.DateField()
     date_to = models.DateField(null=True, blank=True)  # Can be ongoing
     comment = models.TextField(null=True, blank=True)
-    # For secondments, we might need to link to the target/source division
     secondment_division = models.ForeignKey(
         Division,
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
         related_name="seconded_employees_log_entries",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, null=True)
+    created_by = models.ForeignKey(
+        User,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="created_status_logs",
     )
 
     def __str__(self):
@@ -110,10 +117,12 @@ class EmployeeStatusLog(models.Model):
 
 # User Profile to store role and division for JWT/Permissions
 class UserRole(models.IntegerChoices):
-    ROLE_1 = 1, _("Чтение всей организации")
-    ROLE_2 = 2, _("Чтение своего департамента")
-    ROLE_3 = 3, _("Чтение своего департамента + ред. своего управления")
-    ROLE_4 = 4, _("Полный доступ")
+    ROLE_1 = 1, _("Просмотр всей организации (без редактирования)")
+    ROLE_2 = 2, _("Просмотр своего департамента (без редактирования)")
+    ROLE_3 = 3, _("Редактирование своего управления")
+    ROLE_4 = 4, _("Полный доступ (администратор)")
+    ROLE_5 = 5, _("Кадровый администратор подразделения")
+    ROLE_6 = 6, _("Редактирование своего отдела")
 
 
 class UserProfile(models.Model):
