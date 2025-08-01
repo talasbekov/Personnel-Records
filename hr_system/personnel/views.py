@@ -12,6 +12,7 @@ from .serializers import (
 from rest_framework_simplejwt.views import TokenObtainPairView as OriginalTokenObtainPairView
 from .permissions import IsRole4, IsRole1, IsRole2, IsRole3, IsRole5, IsRole6, IsReadOnly
 import datetime
+from django.db import models
 from django.db.models import Q
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -40,6 +41,21 @@ def _gather_descendant_ids(root_division):
 class DivisionViewSet(viewsets.ModelViewSet):
     serializer_class = DivisionSerializer
     permission_classes = [IsRole4 | (IsReadOnly & (IsRole1 | IsRole2 | IsRole3 | IsRole5 | IsRole6))]
+
+    def destroy(self, request, *args, **kwargs):
+        instance = self.get_object()
+        if instance.child_divisions.exists():
+            return Response(
+                {"error": "Cannot delete a division that has child divisions. Please reassign children first."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            return super().destroy(request, *args, **kwargs)
+        except models.ProtectedError:
+            return Response(
+                {"error": "Cannot delete a division that has employees assigned to it. Please reassign them first."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
     def get_queryset(self):
         user = self.request.user
@@ -78,7 +94,6 @@ class DivisionViewSet(viewsets.ModelViewSet):
     def update_statuses(self, request, pk=None):
         division = self.get_object()
         profile = getattr(request.user, 'profile', None)
-
         if not (profile and (profile.role == UserRole.ROLE_4 or (profile.role in [UserRole.ROLE_3, UserRole.ROLE_6] and profile.division_assignment == division))):
             return Response({'error': 'You do not have permission to update statuses for this division.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -126,7 +141,10 @@ class DivisionViewSet(viewsets.ModelViewSet):
         doc_buffer = generate_expense_report_docx(stats)
 
         # 3. Return the file in the response
-        response = HttpResponse(doc_buffer.read(), content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        response = HttpResponse(
+            doc_buffer.read(),
+            content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        )
         response['Content-Disposition'] = f'attachment; filename="expense_report_{division.name}_{report_date}.docx"'
         return response
 
