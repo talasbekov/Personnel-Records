@@ -92,12 +92,8 @@ class EmployeeSerializer(serializers.ModelSerializer):
     division_id = serializers.PrimaryKeyRelatedField(
         queryset=Division.objects.all(), source="division"
     )
-    # user_id = serializers.PrimaryKeyRelatedField(queryset=User.objects.all(), source='user', allow_null=True, required=False)
-
-    # To make position and division more readable in GET requests
     position = PositionSerializer(read_only=True)
     division = DivisionSerializer(read_only=True)
-    # user = UserSerializer(read_only=True, allow_null=True)
 
     class Meta:
         model = Employee
@@ -109,9 +105,31 @@ class EmployeeSerializer(serializers.ModelSerializer):
             "position",
             "division_id",
             "division",
-            # 'user_id', 'user'
         ]
-        # depth = 1 # Alternative to nested serializers for read-only
+
+    def validate(self, data):
+        user = self.context['request'].user
+        if not user.is_authenticated or not hasattr(user, 'profile'):
+            raise serializers.ValidationError("User profile not found.")
+
+        profile = user.profile
+        if profile.role == UserRole.ROLE_5:
+            assigned_division = profile.division_assignment
+            target_division = data.get('division')
+
+            if not assigned_division or not target_division:
+                raise serializers.ValidationError("Assigned division or target division is missing.")
+
+            # Check if target_division is within the scope of assigned_division
+            current = target_division
+            while current:
+                if current == assigned_division:
+                    return data
+                current = current.parent_division
+
+            raise serializers.ValidationError("You do not have permission to create an employee in this division.")
+
+        return data
 
 
 # EmployeeStatusLog might be handled by specific actions rather than generic CRUD

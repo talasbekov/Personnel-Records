@@ -1,121 +1,153 @@
 from rest_framework.permissions import BasePermission, SAFE_METHODS
-from django.contrib.auth.models import User
+from .models import UserRole, Employee, EmployeeStatusType, DivisionType
 
-# When models are stable, you'll import UserRole and EmployeeStatusType like this:
-# from .models import UserRole, Employee, EmployeeStatusType
+class IsReadOnly(BasePermission):
+    """
+    Allows access only for read-only requests (GET, HEAD, OPTIONS).
+    """
+    def has_permission(self, request, view):
+        return request.method in SAFE_METHODS
 
-
-# !!! IMPORTANT: This MockUserRole is a placeholder. !!!
-# !!! Replace its usage below with 'UserRole' (imported from .models) !!!
-# !!! once the UserRole enum/choices are defined in personnel/models.py !!!
-class MockUserRole:
-    ROLE_1 = 1  # Чтение всей организации
-    ROLE_2 = 2  # Чтение своего департамента
-    ROLE_3 = 3  # Чтение своего департамента + редактирование только своего управления
-    ROLE_4 = 4  # Полный доступ
-
-
-class RoleBasePermission(BasePermission):
+class BaseRolePermission(BasePermission):
     """
     Base class for role-based permissions.
-    Assumes user.profile exists and has 'role' and 'division_assignment' attributes.
     """
-
-    def get_user_profile(self, user):
+    def get_profile(self, user):
         if not user or not user.is_authenticated:
             return None
         try:
             return user.profile
-        except User.profile.RelatedObjectDoesNotExist:
-            # print(f"DEBUG: User {user.username} has no profile.") # Optional: for server-side debug logging
-            return None
-        except AttributeError:
-            # print(f"DEBUG: User model may not have 'profile' attribute properly set up.") # Optional
+        except user.profile.RelatedObjectDoesNotExist:
             return None
 
-
-class CanReadEntireOrganization(RoleBasePermission):
-    message = "User requires Role 1 (Read All Organization) for this action."
-
+class IsRole4(BaseRolePermission):
+    """
+    Allows full access for Role 4 (Admin) or superusers.
+    """
     def has_permission(self, request, view):
-        if not request.user or not request.user.is_authenticated:
-            return False
-        if request.user.is_superuser:
-            return True  # Superuser overrides role check
+        profile = self.get_profile(request.user)
+        return request.user.is_superuser or (profile and profile.role == UserRole.ROLE_4)
 
-        profile = self.get_user_profile(request.user)
-        # TODO: Replace MockUserRole with actual UserRole from models
-        return profile and profile.role == MockUserRole.ROLE_1
-
-
-class CanReadOwnDepartment(RoleBasePermission):
-    message = "User requires Role 2 (Read Own Department) and an assigned department."
-
+class IsRole1(BaseRolePermission):
+    """
+    Allows read-only access to the entire organization.
+    """
     def has_permission(self, request, view):
-        if not request.user or not request.user.is_authenticated:
+        if request.method not in SAFE_METHODS:
             return False
-        if request.user.is_superuser:
-            return True
+        profile = self.get_profile(request.user)
+        return profile and profile.role == UserRole.ROLE_1
 
-        profile = self.get_user_profile(request.user)
-        # TODO: Replace MockUserRole with actual UserRole from models
-        return (
-            profile
-            and profile.role == MockUserRole.ROLE_2
-            and profile.division_assignment is not None
-        )
-
-    # TODO: Implement has_object_permission for fine-grained checks if needed,
-    # or rely on get_queryset filtering in views.
-
-
-class CanEditOwnManagement(RoleBasePermission):
-    message = "User requires Role 3 (Edit Own Management), an assigned management, and must not be seconded out."
-
+class IsRole2(BaseRolePermission):
+    """
+    Allows read-only access to their own department.
+    Filtering is handled in the view's get_queryset method.
+    """
     def has_permission(self, request, view):
-        if not request.user or not request.user.is_authenticated:
+        if request.method not in SAFE_METHODS:
             return False
-        if request.user.is_superuser:
-            return True
+        profile = self.get_profile(request.user)
+        return profile and profile.role == UserRole.ROLE_2 and profile.division_assignment
 
-        profile = self.get_user_profile(request.user)
-        # TODO: Replace MockUserRole with actual UserRole from models
-        if not (
-            profile
-            and profile.role == MockUserRole.ROLE_3
-            and profile.division_assignment is not None
-        ):
-            return False
-
-        # Placeholder for 'Откомандирован' (seconded out) check.
-        # This requires Employee model and EmployeeStatusLog model.
-        # from .models import Employee, EmployeeStatusType # Import when models are stable
-        # try:
-        #   # Assumes Employee model has a OneToOneField to User, e.g., request.user.employee_record
-        #   employee_record = request.user.employee_record
-        #   is_seconded_out = employee_record.status_logs.filter(
-        #       status=EmployeeStatusType.SECONDED_OUT, # Assumes SECONDED_OUT is defined
-        #       date_to__isnull=True # Active secondment
-        #   ).exists()
-        #   if is_seconded_out:
-        #       self.message = "User is currently seconded out and cannot edit their original management."
-        #       return False
-        # except (User.employee_record.RelatedObjectDoesNotExist, AttributeError):
-        #   self.message = "Cannot verify secondment status: Employee record not linked to user."
-        #   return False # Or True, based on policy if record missing implies they can/cannot edit
-
-        return True  # If all checks pass
-
-
-class HasFullAccess(RoleBasePermission):
-    message = "User requires Role 4 (Full Access) for this action."
-
+class IsRole3(BaseRolePermission):
+    """
+    Allows editing within their own management.
+    """
     def has_permission(self, request, view):
-        if not request.user or not request.user.is_authenticated:
+        profile = self.get_profile(request.user)
+        if not (profile and profile.role == UserRole.ROLE_3 and profile.division_assignment):
             return False
-        if request.user.is_superuser:
-            return True
 
-        profile = self.get_user_profile(request.user)
-        # TODO: Replace MockUserRole with actual UserRole from models
-        return profile and profile.role == MockUserRole.ROLE_4
+        # Check if the user is seconded out
+        try:
+            is_seconded_out = Employee.objects.filter(
+                user=request.user,
+                status_logs__status=EmployeeStatusType.SECONDED_OUT,
+                status_logs__date_to__isnull=True
+            ).exists()
+            if is_seconded_out:
+                return False
+        except Employee.DoesNotExist:
+            return False # If no employee record, cannot have this role's permissions
+
+        return True
+
+    def has_object_permission(self, request, view, obj):
+        profile = self.get_profile(request.user)
+        if not profile or not profile.division_assignment:
+            return False
+
+        # User's assigned division must be the object itself or its parent
+        assigned_division = profile.division_assignment
+        if isinstance(obj, Employee):
+            return obj.division == assigned_division
+        elif isinstance(obj, Division):
+            return obj == assigned_division
+        return False
+
+class IsRole5(BaseRolePermission):
+    """
+    Allows HR admin operations within their assigned division scope.
+    """
+    def has_permission(self, request, view):
+        profile = self.get_profile(request.user)
+        return profile and profile.role == UserRole.ROLE_5 and profile.division_assignment
+
+    def has_object_permission(self, request, view, obj):
+        profile = self.get_profile(request.user)
+        if not profile or not profile.division_assignment:
+            return False
+
+        assigned_division = profile.division_assignment
+
+        target_division = None
+        if isinstance(obj, Employee):
+            target_division = obj.division
+        elif isinstance(obj, Division):
+            target_division = obj
+
+        if not target_division:
+            return False
+
+        # Check if the target division is the assigned one or a child of it.
+        current = target_division
+        while current:
+            if current == assigned_division:
+                return True
+            current = current.parent_division
+        return False
+
+class IsRole6(BaseRolePermission):
+    """
+    Allows editing within their own office/department.
+    """
+    def has_permission(self, request, view):
+        profile = self.get_profile(request.user)
+        if not (profile and profile.role == UserRole.ROLE_6 and profile.division_assignment):
+            return False
+
+        # Check if the user is seconded out
+        try:
+            is_seconded_out = Employee.objects.filter(
+                user=request.user,
+                status_logs__status=EmployeeStatusType.SECONDED_OUT,
+                status_logs__date_to__isnull=True
+            ).exists()
+            if is_seconded_out:
+                return False
+        except Employee.DoesNotExist:
+            return False
+
+        return True
+
+    def has_object_permission(self, request, view, obj):
+        profile = self.get_profile(request.user)
+        if not profile or not profile.division_assignment:
+            return False
+
+        assigned_division = profile.division_assignment
+        if isinstance(obj, Employee):
+            return obj.division == assigned_division
+        elif isinstance(obj, Division):
+            return obj == assigned_division
+        return False

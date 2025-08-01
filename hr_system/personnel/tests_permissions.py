@@ -1,0 +1,80 @@
+from django.contrib.auth.models import User
+from rest_framework.test import APITestCase
+from rest_framework import status
+from .models import Position, Division, Employee, UserProfile, UserRole, DivisionType, EmployeeStatusType
+
+class PermissionsTest(APITestCase):
+    def setUp(self):
+        # Create a hierarchy of divisions
+        self.company = Division.objects.create(name="Company", division_type=DivisionType.COMPANY)
+        self.dep1 = Division.objects.create(name="Department 1", division_type=DivisionType.DEPARTMENT, parent_division=self.company)
+        self.dep2 = Division.objects.create(name="Department 2", division_type=DivisionType.DEPARTMENT, parent_division=self.company)
+        self.man1_dep1 = Division.objects.create(name="Management 1.1", division_type=DivisionType.MANAGEMENT, parent_division=self.dep1)
+        self.off1_man1_dep1 = Division.objects.create(name="Office 1.1.1", division_type=DivisionType.OFFICE, parent_division=self.man1_dep1)
+
+        # Create positions
+        self.pos1 = Position.objects.create(name="Manager", level=10)
+        self.pos2 = Position.objects.create(name="Clerk", level=20)
+
+        # Create users for each role
+        self.user_role1 = self.create_user_with_role('user_role1', UserRole.ROLE_1)
+        self.user_role2 = self.create_user_with_role('user_role2', UserRole.ROLE_2, self.dep1)
+        self.user_role3 = self.create_user_with_role('user_role3', UserRole.ROLE_3, self.man1_dep1)
+        self.user_role4 = self.create_user_with_role('user_role4', UserRole.ROLE_4)
+        self.user_role5 = self.create_user_with_role('user_role5', UserRole.ROLE_5, self.dep1)
+        self.user_role6 = self.create_user_with_role('user_role6', UserRole.ROLE_6, self.off1_man1_dep1)
+
+        # Create employees
+        self.emp_dep1 = Employee.objects.create(full_name="Emp Dep1", position=self.pos1, division=self.dep1)
+        self.emp_dep2 = Employee.objects.create(full_name="Emp Dep2", position=self.pos2, division=self.dep2)
+        self.emp_man1_dep1 = Employee.objects.create(full_name="Emp Man1", position=self.pos1, division=self.man1_dep1)
+
+    def create_user_with_role(self, username, role, division=None):
+        user = User.objects.create_user(username=username, password='password')
+        UserProfile.objects.create(user=user, role=role, division_assignment=division)
+        return user
+
+    def test_role1_permissions(self):
+        self.client.force_authenticate(user=self.user_role1)
+        # Can read all employees
+        response = self.client.get('/api/personnel/employees/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 3)
+        # Cannot create employee
+        response = self.client.post('/api/personnel/employees/', {'full_name': 'New', 'position_id': self.pos1.id, 'division_id': self.dep1.id})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_role2_permissions(self):
+        self.client.force_authenticate(user=self.user_role2)
+        # Can read employees in their department
+        response = self.client.get('/api/personnel/employees/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 2) # emp_dep1 and emp_man1_dep1
+        # Cannot see employees in other departments
+        self.assertNotIn(self.emp_dep2.full_name, [e['full_name'] for e in response.data['results']])
+        # Cannot create employee
+        response = self.client.post('/api/personnel/employees/', {'full_name': 'New', 'position_id': self.pos1.id, 'division_id': self.dep1.id})
+        self.assertEqual(response.status_code, status.HTTP_403_FORBIDDEN)
+
+    def test_role4_permissions(self):
+        self.client.force_authenticate(user=self.user_role4)
+        # Can read all employees
+        response = self.client.get('/api/personnel/employees/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 3)
+        # Can create employee
+        response = self.client.post('/api/personnel/employees/', {'full_name': 'New by Admin', 'position_id': self.pos1.id, 'division_id': self.dep1.id})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+
+    def test_role5_permissions(self):
+        self.client.force_authenticate(user=self.user_role5)
+        # Can read employees in their department
+        response = self.client.get('/api/personnel/employees/')
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data['results']), 2)
+        # Can create employee in their department
+        response = self.client.post('/api/personnel/employees/', {'full_name': 'New by HR', 'position_id': self.pos1.id, 'division_id': self.man1_dep1.id})
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        # Cannot create employee outside their department
+        response = self.client.post('/api/personnel/employees/', {'full_name': 'New by HR Invalid', 'position_id': self.pos1.id, 'division_id': self.dep2.id})
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)

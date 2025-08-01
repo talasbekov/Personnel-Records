@@ -9,9 +9,9 @@ from .views import (
 )
 
 router = DefaultRouter()
-router.register(r"divisions", DivisionViewSet)
+router.register(r"divisions", DivisionViewSet, basename="division")
 router.register(r"positions", PositionViewSet)
-router.register(r"employees", EmployeeViewSet)
+router.register(r"employees", EmployeeViewSet, basename="employee")
 router.register(r"user-profiles", UserProfileViewSet)
 # router.register(r'status-logs', EmployeeStatusLogViewSet)
 

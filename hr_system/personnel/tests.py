@@ -1,7 +1,7 @@
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 from rest_framework import status
-from .models import Position, Division, Employee
+from .models import Position, Division, Employee, UserProfile, UserRole
 
 class PositionAPITest(APITestCase):
     """
@@ -10,6 +10,7 @@ class PositionAPITest(APITestCase):
     def setUp(self):
         # We need a user to authenticate
         self.user = User.objects.create_user(username='testuser', password='testpassword')
+        UserProfile.objects.create(user=self.user, role=UserRole.ROLE_4)
         self.client.force_authenticate(user=self.user)
 
     def test_list_positions(self):
@@ -37,6 +38,7 @@ class PositionAPITest(APITestCase):
 class DivisionEmployeeAPITest(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(username='testuser', password='testpassword')
+        UserProfile.objects.create(user=self.user, role=UserRole.ROLE_4)
         self.client.force_authenticate(user=self.user)
 
         self.position = Position.objects.create(name="Тестовая должность", level=99)
