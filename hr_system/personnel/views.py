@@ -17,25 +17,25 @@ from rest_framework_simplejwt.views import (
 class DivisionViewSet(viewsets.ModelViewSet):
     queryset = Division.objects.all().prefetch_related("child_divisions")
     serializer_class = DivisionSerializer
-    # permission_classes = [permissions.IsAdminUser] # Placeholder
+    permission_classes = [permissions.IsAuthenticated]
 
 
 class PositionViewSet(viewsets.ModelViewSet):
     queryset = Position.objects.all()
     serializer_class = PositionSerializer
-    # permission_classes = [permissions.IsAdminUser] # Placeholder
+    permission_classes = [permissions.IsAuthenticated]
 
 
 class EmployeeViewSet(viewsets.ModelViewSet):
     queryset = Employee.objects.all().select_related("position", "division")
     serializer_class = EmployeeSerializer
-    # permission_classes = [permissions.IsAuthenticated] # Placeholder
+    permission_classes = [permissions.IsAuthenticated]
 
 
 class UserProfileViewSet(viewsets.ModelViewSet):
     queryset = UserProfile.objects.all().select_related("user", "division_assignment")
     serializer_class = UserProfileSerializer
-    # permission_classes = [permissions.IsAdminUser] # Placeholder
+    permission_classes = [permissions.IsAuthenticated]
 
 
 # class EmployeeStatusLogViewSet(viewsets.ModelViewSet):
