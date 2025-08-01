@@ -31,11 +31,21 @@ class DivisionViewSet(viewsets.ModelViewSet):
             return Division.objects.none()
         if profile.role in [UserRole.ROLE_2, UserRole.ROLE_5]:
             descendant_ids = [assigned_division.id]
-            children = list(assigned_division.child_divisions.all())
-            while children:
-                child = children.pop()
-                descendant_ids.append(child.id)
-                children.extend(list(child.child_divisions.all()))
+            # Fetch descendants only if the flag is set for Role 5, or always for Role 2
+            fetch_children = (profile.role == UserRole.ROLE_2) or \
+                             (profile.role == UserRole.ROLE_5 and profile.include_child_divisions)
+
+            if fetch_children:
+                queue = [assigned_division]
+                visited = {assigned_division.id}
+                while queue:
+                    current_division = queue.pop(0)
+                    for child in current_division.child_divisions.all():
+                        if child.id not in visited:
+                            descendant_ids.append(child.id)
+                            visited.add(child.id)
+                            queue.append(child)
+
             return Division.objects.filter(id__in=descendant_ids).prefetch_related("child_divisions")
         if profile.role in [UserRole.ROLE_3, UserRole.ROLE_6]:
             return Division.objects.filter(id=assigned_division.id).prefetch_related("child_divisions")
@@ -88,20 +98,39 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if not user.is_authenticated or not hasattr(user, 'profile'):
             return Employee.objects.none()
+
+        # Base queryset with ordering
+        base_queryset = Employee.objects.select_related("position", "division").order_by('position__level', 'full_name')
+
         profile = user.profile
         if profile.role in [UserRole.ROLE_1, UserRole.ROLE_4]:
-            return Employee.objects.all().select_related("position", "division")
+            return base_queryset.all()
+
         assigned_division = profile.division_assignment
         if not assigned_division:
             return Employee.objects.none()
+
         descendant_ids = [assigned_division.id]
-        if profile.role in [UserRole.ROLE_2, UserRole.ROLE_5]:
-            children = list(assigned_division.child_divisions.all())
-            while children:
-                child = children.pop()
-                descendant_ids.append(child.id)
-                children.extend(list(child.child_divisions.all()))
-        return Employee.objects.filter(division__id__in=descendant_ids).select_related("position", "division")
+        # For roles 2 and 5, fetch descendants only if the flag is set
+        fetch_children = (profile.role == UserRole.ROLE_2) or \
+                         (profile.role == UserRole.ROLE_5 and profile.include_child_divisions)
+
+        if fetch_children:
+            # A more efficient way to get all descendant IDs
+            queue = [assigned_division]
+            visited = {assigned_division.id}
+            while queue:
+                current_division = queue.pop(0)
+                # We need to fetch children for the current division in the queue
+                # Note: This can still be slow for very deep hierarchies.
+                # A recursive CTE would be the most performant solution.
+                for child in current_division.child_divisions.all():
+                    if child.id not in visited:
+                        descendant_ids.append(child.id)
+                        visited.add(child.id)
+                        queue.append(child)
+
+        return base_queryset.filter(division__id__in=descendant_ids)
 
 class UserProfileViewSet(viewsets.ModelViewSet):
     queryset = UserProfile.objects.all().select_related("user", "division_assignment")

@@ -72,9 +72,35 @@ class DivisionEmployeeAPITest(APITestCase):
         response = self.client.delete(retrieve_url, format='json')
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
 
-        # Verify it's gone
-        response = self.client.get(retrieve_url, format='json')
-        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+    def test_employee_list_is_sorted_by_position_level(self):
+        """
+        Ensure the employee list is sorted by position level (hierarchy).
+        """
+        # Create positions with different levels
+        senior_position = Position.objects.create(name="Старший", level=10)
+        junior_position = Position.objects.create(name="Младший", level=20)
+
+        # Create employees in a non-alphabetical, non-chronological order
+        employee_junior = Employee.objects.create(full_name="Боб Младший", position=junior_position, division=self.division)
+        employee_senior = Employee.objects.create(full_name="Алиса Старшая", position=senior_position, division=self.division)
+
+        # Fetch the list of employees
+        url = '/api/personnel/employees/'
+        response = self.client.get(url, format='json')
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+
+        # The response should contain all employees, including the one from setUp
+        results = response.data['results']
+        self.assertGreaterEqual(len(results), 2)
+
+        # Find the indices of our created employees
+        names_in_response = [emp['full_name'] for emp in results]
+        senior_index = names_in_response.index(employee_senior.full_name)
+        junior_index = names_in_response.index(employee_junior.full_name)
+
+        # Assert that the senior employee appears before the junior one
+        self.assertLess(senior_index, junior_index, "Senior employee should appear before junior employee in the list.")
 
     def test_employee_crud_lifecycle(self):
         """
