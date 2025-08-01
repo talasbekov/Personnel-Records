@@ -119,3 +119,131 @@ def get_division_statistics(division: Division, on_date: datetime.date):
     assert in_lineup_count == in_lineup_check
 
     return stats
+
+
+import io
+from docx import Document
+from docx.shared import Pt, Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.section import WD_ORIENT
+
+def generate_expense_report_docx(division_stats: dict):
+    """
+    Generates a .docx expense report from division statistics.
+
+    Args:
+        division_stats: A dictionary of stats from get_division_statistics.
+
+    Returns:
+        An in-memory io.BytesIO buffer containing the .docx file.
+    """
+    document = Document()
+
+    # --- 1. Set Page Orientation to Landscape ---
+    section = document.sections[0]
+    new_width, new_height = section.page_height, section.page_width
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width = new_width
+    section.page_height = new_height
+    section.left_margin = Cm(1.5)
+    section.right_margin = Cm(1.5)
+    section.top_margin = Cm(1.0)
+    section.bottom_margin = Cm(1.0)
+
+    # --- 2. Add Title ---
+    title_str = f"{division_stats['division_name']} ЖЕКЕ ҚҰРАМЫНЫҢ САПТЫҚ ТІЗІМІ {division_stats['on_date'].strftime('%d.%m.%Y')} ЖЫЛҒЫ"
+    title_paragraph = document.add_paragraph()
+    title_run = title_paragraph.add_run(title_str)
+    title_run.font.name = 'Times New Roman'
+    title_run.font.size = Pt(16)
+    title_run.bold = True
+    title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # --- 3. Add Table ---
+    # Define statuses to include in the report columns, in order
+    status_columns = [
+        EmployeeStatusType.ON_DUTY_ACTUAL,
+        EmployeeStatusType.AFTER_DUTY,
+        EmployeeStatusType.BUSINESS_TRIP,
+        EmployeeStatusType.TRAINING_ETC,
+        EmployeeStatusType.ON_LEAVE,
+        EmployeeStatusType.SICK_LEAVE,
+        EmployeeStatusType.SECONDED_IN,
+        EmployeeStatusType.SECONDED_OUT,
+    ]
+
+    num_cols = 6 + len(status_columns)
+    table = document.add_table(rows=1, cols=num_cols)
+    table.style = 'Table Grid'
+    table.autofit = False # Allows setting manual column widths
+
+    # --- 4. Set Column Headers and Widths ---
+    hdr_cells = table.rows[0].cells
+    headers = [
+        "№", "Название управления", "Количество по штату",
+        "Количество по списку", "Вакантные должности", "В строю"
+    ] + [s.label for s in status_columns]
+
+    for i, header_text in enumerate(headers):
+        cell = hdr_cells[i]
+        cell.text = header_text
+        cell.paragraphs[0].runs[0].font.size = Pt(12)
+        cell.paragraphs[0].runs[0].bold = True
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        # You can set column widths here if needed, e.g., hdr_cells[0].width = Cm(1)
+
+    # --- 5. Populate Data Row (for a single division report for now) ---
+    # This part needs to be adapted for reports with multiple sub-divisions
+    row_cells = table.add_row().cells
+
+    on_list_display = f"{division_stats['on_list_count']}"
+    if division_stats['seconded_in_count'] > 0:
+        on_list_display += f" +{division_stats['seconded_in_count']}"
+
+    data_row = [
+        "1",
+        division_stats['division_name'],
+        str(division_stats['total_staffing']),
+        on_list_display,
+        str(division_stats['vacant_count']),
+        str(division_stats['in_lineup_count']),
+    ]
+
+    for status in status_columns:
+        count = division_stats['status_counts'].get(status, 0)
+        # For SECONDED_IN, we use the dedicated count
+        if status == EmployeeStatusType.SECONDED_IN:
+            count = division_stats['seconded_in_count']
+
+        # This is a simplified version. The spec requires 4 sub-rows per status.
+        # Implementing that requires a more complex table structure.
+        # For now, we just put the count.
+        cell_content = f"{count}\n"
+        details = division_stats.get('status_details', {}).get(status, [])
+        if details:
+            cell_content += "\n".join([d['full_name'] for d in details])
+
+        data_row.append(cell_content)
+
+    for i, cell_text in enumerate(data_row):
+        cell = row_cells[i]
+        cell.text = str(cell_text)
+        cell.paragraphs[0].runs[0].font.size = Pt(8)
+
+    # --- 6. Add Total Row ---
+    # This would require summing up stats if there were multiple rows.
+    # For now, we just copy the single data row and make it bold.
+    total_cells = table.add_row().cells
+    total_cells[1].text = "Общее"
+    total_cells[1].paragraphs[0].runs[0].bold = True
+
+    for i in range(2, num_cols):
+        total_cells[i].text = row_cells[i].text
+        total_cells[i].paragraphs[0].runs[0].bold = True
+
+
+    # --- 7. Save to Buffer ---
+    buffer = io.BytesIO()
+    document.save(buffer)
+    buffer.seek(0)
+    return buffer

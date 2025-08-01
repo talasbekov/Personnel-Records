@@ -11,9 +11,11 @@ from .serializers import (
 )
 from rest_framework_simplejwt.views import TokenObtainPairView as OriginalTokenObtainPairView
 from .permissions import IsRole4, IsRole1, IsRole2, IsRole3, IsRole5, IsRole6, IsReadOnly
+import datetime
 from django.db.models import Q
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from django.http import HttpResponse
 
 class DivisionViewSet(viewsets.ModelViewSet):
     serializer_class = DivisionSerializer
@@ -84,6 +86,29 @@ class DivisionViewSet(viewsets.ModelViewSet):
 
         EmployeeStatusLog.objects.bulk_create(status_logs)
         return Response({'status': 'Statuses updated successfully.'}, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=['get'], url_path='report')
+    def report(self, request, pk=None):
+        """
+        Generates and returns the .docx expense report for this division.
+        """
+        division = self.get_object()
+
+        # For now, we use today's date. This could be a query param.
+        report_date = datetime.date.today()
+
+        # 1. Get statistics using the service
+        from .services import get_division_statistics, generate_expense_report_docx
+        stats = get_division_statistics(division, report_date)
+
+        # 2. Generate the .docx file in memory
+        doc_buffer = generate_expense_report_docx(stats)
+
+        # 3. Return the file in the response
+        response = HttpResponse(doc_buffer.read(), content_type='application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        response['Content-Disposition'] = f'attachment; filename="expense_report_{division.name}_{report_date}.docx"'
+        return response
+
 
 class PositionViewSet(viewsets.ModelViewSet):
     queryset = Position.objects.all()

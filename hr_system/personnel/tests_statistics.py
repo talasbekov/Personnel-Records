@@ -80,3 +80,48 @@ class StatisticsCalculationTest(TestCase):
         self.assertEqual(seconded_status_counts.get(EmployeeStatusType.ON_DUTY_SCHEDULED, 0), 1)
         self.assertEqual(seconded_status_counts.get(EmployeeStatusType.ON_LEAVE, 0), 1)
         self.assertEqual(sum(seconded_status_counts.values()), 2)
+
+
+import io
+from docx import Document
+from django.contrib.auth.models import User
+from rest_framework.test import APITestCase
+from .models import UserProfile, UserRole
+
+class ReportGenerationTest(APITestCase):
+    def setUp(self):
+        self.dep = Division.objects.create(name="Report Test Dep", division_type=DivisionType.DEPARTMENT)
+        self.user = User.objects.create_user(username='testuser', password='password')
+        # Create a UserProfile for the test user to satisfy permission checks
+        UserProfile.objects.create(user=self.user, role=UserRole.ROLE_4)
+        self.client.force_authenticate(user=self.user)
+
+    def test_report_endpoint_returns_docx_file(self):
+        """
+        Tests that the /report endpoint returns a valid .docx file response.
+        """
+        url = f'/api/personnel/divisions/{self.dep.id}/report/'
+        response = self.client.get(url)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+        self.assertIn('attachment; filename=', response['Content-Disposition'])
+
+        # --- Verify the document content ---
+        # Load the response content into a document object
+        doc_buffer = io.BytesIO(response.content)
+        document = Document(doc_buffer)
+
+        # Check the title
+        title_text = document.paragraphs[0].text
+        self.assertIn("Report Test Dep", title_text)
+        self.assertIn("САПТЫҚ ТІЗІМІ", title_text)
+
+        # Check that a table was created
+        self.assertTrue(len(document.tables) > 0, "The report should contain a table.")
+
+        # Check table headers
+        table = document.tables[0]
+        headers = [cell.text for cell in table.rows[0].cells]
+        self.assertIn("Количество по списку", headers)
+        self.assertIn("В строю", headers)
