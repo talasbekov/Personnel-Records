@@ -11,6 +11,7 @@ from .models import (
     EmployeeStatusType,
     SecondmentRequest,
 )
+from django.db.models import Q
 from rest_framework_simplejwt.serializers import (
     TokenObtainPairSerializer,
 )  # Added by subtask
@@ -179,6 +180,50 @@ class EmployeeStatusLogSerializer(serializers.ModelSerializer):
             "created_by",
         ]
         read_only_fields = ("created_at", "created_by")
+
+    def validate(self, data):
+        """
+        Check for conflicting, overlapping statuses.
+        """
+        employee = data.get('employee')
+        new_status = data.get('status')
+        date_from = data.get('date_from')
+        date_to = data.get('date_to')
+
+        if not all([employee, new_status, date_from]):
+            # Not enough data to validate, other validators will catch this.
+            return data
+
+        # Define statuses that can coexist with others.
+        COEXISTING_STATUSES = {EmployeeStatusType.SECONDED_OUT, EmployeeStatusType.SECONDED_IN}
+
+        # If the new status can coexist, no need to check for conflicts.
+        if new_status in COEXISTING_STATUSES:
+            return data
+
+        # Find existing statuses that overlap with the new date range.
+        # An overlap occurs if (StartA <= EndB) and (EndA >= StartB)
+        overlapping_statuses = EmployeeStatusLog.objects.filter(
+            employee=employee,
+            # Exclude statuses that can coexist.
+            status__in=[s for s in EmployeeStatusType if s not in COEXISTING_STATUSES],
+            date_from__lte=date_to if date_to else date_from,
+        ).filter(
+            Q(date_to__gte=date_from) | Q(date_to__isnull=True)
+        )
+
+        # If we are updating an existing instance, we should exclude it from the check.
+        if self.instance:
+            overlapping_statuses = overlapping_statuses.exclude(pk=self.instance.pk)
+
+        if overlapping_statuses.exists():
+            conflict = overlapping_statuses.first()
+            raise serializers.ValidationError(
+                f"The proposed status conflicts with an existing status ('{conflict.get_status_display()}') "
+                f"from {conflict.date_from} to {conflict.date_to or 'ongoing'}."
+            )
+
+        return data
 
     def create(self, validated_data):
         validated_data["created_by"] = self.context["request"].user

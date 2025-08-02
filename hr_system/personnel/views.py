@@ -34,9 +34,7 @@ from django.http import HttpResponse
 
 def _gather_descendant_ids(root_division):
     """
-    Простой BFS для сбора всех потомков. Можно заменить на рекурсивный CTE
-    или использовать специализированную библиотеку (django-mptt/treebeard)
-    для лучшей производительности на глубоких деревьях.
+    BFS для сбора всех потомков. Можно заменить на рекурсивный CTE / tree lib для масштабов.
     """
     descendant_ids = [root_division.id]
     queue = [root_division]
@@ -153,9 +151,6 @@ class DivisionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="report")
     def report(self, request, pk=None):
-        """
-        Generates and returns the .docx expense report for this division.
-        """
         division = self.get_object()
         report_date = datetime.date.today()
 
@@ -168,16 +163,11 @@ class DivisionViewSet(viewsets.ModelViewSet):
             doc_buffer.read(),
             content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         )
-        response[
-            "Content-Disposition"
-        ] = f'attachment; filename="expense_report_{division.name}_{report_date}.docx"'
+        response["Content-Disposition"] = f'attachment; filename="expense_report_{division.name}_{report_date}.docx"'
         return response
 
     @action(detail=False, methods=["get"], url_path="status-summary")
     def status_summary(self, request):
-        """
-        Provides a hierarchical summary of status update indicators for all divisions.
-        """
         summary_date_str = request.query_params.get("date", datetime.date.today().isoformat())
         summary_date = datetime.date.fromisoformat(summary_date_str)
 
@@ -263,7 +253,6 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         base_queryset = Employee.objects.select_related("position", "division").order_by(
             "position__level", "full_name"
         )
-
         profile = user.profile
 
         if profile.role in [UserRole.ROLE_1, UserRole.ROLE_4]:
@@ -309,7 +298,6 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         profile = request.user.profile
         if profile.role == UserRole.ROLE_5:
             scope_checker = IsRole5()
-            # assuming has_object_permission takes (request, view, obj)
             if not scope_checker.has_object_permission(request, self, employee.division) or not scope_checker.has_object_permission(
                 request, self, new_division
             ):
@@ -336,12 +324,21 @@ class MyTokenObtainPairView(OriginalTokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
 
 
+class EmployeeStatusLogViewSet(viewsets.ModelViewSet):
+    queryset = EmployeeStatusLog.objects.all()
+    serializer_class = EmployeeStatusLogSerializer
+    permission_classes = [permissions.IsAuthenticated]
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+
 class SecondmentRequestViewSet(viewsets.ModelViewSet):
     queryset = SecondmentRequest.objects.all().select_related(
         "employee__position", "from_division", "to_division", "requested_by", "approved_by"
     )
     serializer_class = SecondmentRequestSerializer
-    permission_classes = [IsRole4 | IsRole5]  # Basic; per-action refinement can be added
+    permission_classes = [IsRole4 | IsRole5]
 
     def perform_create(self, serializer):
         serializer.save()
