@@ -1,0 +1,17 @@
+from rest_framework import viewsets
+from django_filters.rest_framework import DjangoFilterBackend
+from rest_framework import filters
+from .models import AuditLog
+from .serializers import AuditLogSerializer
+from .filters import AuditLogFilter
+
+class AuditLogViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    API endpoint that allows audit logs to be viewed.
+    """
+    queryset = AuditLog.objects.all()
+    serializer_class = AuditLogSerializer
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
+    filterset_class = AuditLogFilter
+    ordering_fields = ['timestamp', 'user', 'action_type']
+    ordering = ['-timestamp']
