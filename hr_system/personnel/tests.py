@@ -1,4 +1,5 @@
 from django.contrib.auth.models import User
+from django.test import TestCase
 from rest_framework.test import APITestCase
 from rest_framework import status
 from .models import Position, Division, Employee, UserProfile, UserRole
@@ -32,6 +33,29 @@ class PositionAPITest(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data.get('name'), "Инспектор")
 
+    def test_position_list_is_cached(self):
+        """
+        Test that the position list endpoint is cached.
+        """
+        url = '/api/personnel/positions/'
+        with self.assertNumQueries(1):
+            self.client.get(url, format='json')
+        with self.assertNumQueries(0):
+            self.client.get(url, format='json')
+
+    def test_position_cache_is_invalidated_on_change(self):
+        """
+        Test that the position cache is invalidated when a position is changed.
+        """
+        url = '/api/personnel/positions/'
+        self.client.get(url, format='json') # Prime the cache
+
+        Position.objects.create(name='New Position', level=100)
+
+        with self.assertNumQueries(1):
+            response = self.client.get(url, format='json')
+        self.assertEqual(response.data.get('count'), 21)
+
 
 class DivisionEmployeeAPITest(APITestCase):
     def setUp(self):
@@ -63,6 +87,29 @@ class DivisionEmployeeAPITest(APITestCase):
 
         response = self.client.delete(retrieve_url, format='json')
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+    def test_division_list_is_cached(self):
+        """
+        Test that the division list endpoint is cached.
+        """
+        url = '/api/personnel/divisions/'
+        with self.assertNumQueries(1):
+            self.client.get(url, format='json')
+        with self.assertNumQueries(0):
+            self.client.get(url, format='json')
+
+    def test_division_cache_is_invalidated_on_change(self):
+        """
+        Test that the division cache is invalidated when a division is changed.
+        """
+        url = '/api/personnel/divisions/'
+        self.client.get(url, format='json') # Prime the cache
+
+        Division.objects.create(name='New Division', division_type='OFFICE')
+
+        with self.assertNumQueries(1):
+            response = self.client.get(url, format='json')
+        self.assertEqual(response.data.get('count'), 2)
 
 
 class CachingTest(APITestCase):
