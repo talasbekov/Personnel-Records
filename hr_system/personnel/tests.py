@@ -2,6 +2,7 @@ from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 from rest_framework import status
 from .models import Position, Division, Employee, UserProfile, UserRole
+from django.core.cache import cache
 
 class PositionAPITest(APITestCase):
     """
@@ -62,6 +63,16 @@ class DivisionEmployeeAPITest(APITestCase):
 
         response = self.client.delete(retrieve_url, format='json')
         self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+
+
+class CachingTest(APITestCase):
+    def test_cache_set_and_get(self):
+        """
+        Test that we can set and get a value from the cache.
+        """
+        cache.set('my_key', 'my_value', 30)
+        value = cache.get('my_key')
+        self.assertEqual(value, 'my_value')
 
     def test_prevent_cyclical_division_dependency(self):
         """
