@@ -48,6 +48,29 @@ class DivisionSerializer(serializers.ModelSerializer):
         serializer = self.__class__(children_queryset, many=True, context=self.context)
         return serializer.data
 
+    def validate(self, data):
+        """
+        Check for cyclical dependencies.
+        """
+        instance = self.instance
+        parent = data.get('parent_division')
+
+        if not parent:
+            return data # No parent, no cycle
+
+        # On create, instance is None. On update, it's the object being updated.
+        if instance and parent == instance:
+            raise serializers.ValidationError("A division cannot be its own parent.")
+
+        # Traverse up from the parent to see if we hit the instance
+        current = parent
+        while current:
+            if instance and current == instance:
+                raise serializers.ValidationError("A division cannot have one of its children as its parent.")
+            current = current.parent_division
+
+        return data
+
 
 class PositionSerializer(serializers.ModelSerializer):
     class Meta:
