@@ -22,22 +22,18 @@ from .services import get_division_statistics
 
 class StatisticsCalculationTest(TestCase):
     def setUp(self):
-        # --- Create Divisions ---
         self.dep1 = Division.objects.create(name="Department 1", division_type=DivisionType.DEPARTMENT)
         self.man1_dep1 = Division.objects.create(
             name="Management 1.1", division_type=DivisionType.MANAGEMENT, parent_division=self.dep1
         )
         self.dep2 = Division.objects.create(name="Department 2", division_type=DivisionType.DEPARTMENT)
 
-        # --- Create Positions ---
         self.manager_pos = Position.objects.create(name="Manager", level=10)
         self.clerk_pos = Position.objects.create(name="Clerk", level=20)
 
-        # --- Define Staffing Plan for Department 1 ---
         StaffingUnit.objects.create(division=self.dep1, position=self.manager_pos, quantity=2)
         StaffingUnit.objects.create(division=self.man1_dep1, position=self.clerk_pos, quantity=8)
 
-        # --- Create Employees for Department 1 ---
         self.emp_in_lineup = Employee.objects.create(
             full_name="Сотрудник В Строю",
             division=self.man1_dep1,
@@ -99,7 +95,6 @@ class StatisticsCalculationTest(TestCase):
             hired_date=datetime.date(2024, 1, 1),
         )
 
-        # --- Create Employees Seconded INTO Department 1 ---
         emp_to_second_in_1 = Employee.objects.create(
             full_name="Прикомандированный 1",
             division=self.dep2,
@@ -138,34 +133,12 @@ class StatisticsCalculationTest(TestCase):
         test_date = datetime.date(2025, 1, 15)
         stats = get_division_statistics(self.dep1, test_date)
 
-        # Top-level assertions
-        self.assertEqual(
-            stats["total_staffing"],
-            10,
-            "Total staffing should be sum of all units in division and sub-divisions.",
-        )
-        self.assertEqual(
-            stats["on_list_count"],
-            6,
-            "On list count should be all employees homed in the division.",
-        )
-        self.assertEqual(
-            stats["vacant_count"],
-            4,
-            "Vacant should be staffing minus on-list.",
-        )
-        self.assertEqual(
-            stats["seconded_in_count"],
-            2,
-            "Seconded-in count should be 2.",
-        )
-        self.assertEqual(
-            stats["in_lineup_count"],
-            2,
-            "In line-up count should be 2.",
-        )
+        self.assertEqual(stats["total_staffing"], 10)
+        self.assertEqual(stats["on_list_count"], 6)
+        self.assertEqual(stats["vacant_count"], 4)
+        self.assertEqual(stats["seconded_in_count"], 2)
+        self.assertEqual(stats["in_lineup_count"], 2)
 
-        # Status counts for on-list employees
         status_counts = stats["status_counts"]
         self.assertEqual(status_counts.get(EmployeeStatusType.ON_DUTY_SCHEDULED, 0), 2)
         self.assertEqual(status_counts.get(EmployeeStatusType.ON_LEAVE, 0), 1)
@@ -173,23 +146,17 @@ class StatisticsCalculationTest(TestCase):
         self.assertEqual(status_counts.get(EmployeeStatusType.BUSINESS_TRIP, 0), 1)
         self.assertEqual(status_counts.get(EmployeeStatusType.SECONDED_OUT, 0), 1)
 
-        # Formula check
         self.assertEqual(stats["on_list_count"], sum(status_counts.values()))
 
-        # Seconded-in breakdown
         seconded_status_counts = stats["seconded_in_status_counts"]
-        self.assertEqual(
-            seconded_status_counts.get(EmployeeStatusType.ON_DUTY_SCHEDULED, 0), 1
-        )
+        self.assertEqual(seconded_status_counts.get(EmployeeStatusType.ON_DUTY_SCHEDULED, 0), 1)
         self.assertEqual(seconded_status_counts.get(EmployeeStatusType.ON_LEAVE, 0), 1)
         self.assertEqual(sum(seconded_status_counts.values()), 2)
 
 
 class ReportGenerationTest(APITestCase):
     def setUp(self):
-        self.dep = Division.objects.create(
-            name="Report Test Dep", division_type=DivisionType.DEPARTMENT
-        )
+        self.dep = Division.objects.create(name="Report Test Dep", division_type=DivisionType.DEPARTMENT)
         self.user = User.objects.create_user(username="testuser", password="password")
         UserProfile.objects.create(user=self.user, role=UserRole.ROLE_4)
         self.client.force_authenticate(user=self.user)
@@ -199,43 +166,31 @@ class ReportGenerationTest(APITestCase):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response["Content-Type"],
-            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
+        self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
         self.assertIn("attachment; filename=", response["Content-Disposition"])
 
         doc_buffer = io.BytesIO(response.content)
         document = Document(doc_buffer)
-
         title_text = document.paragraphs[0].text
         self.assertIn("Report Test Dep", title_text)
         self.assertIn("САПТЫҚ ТІЗІМІ", title_text)
 
-        self.assertTrue(len(document.tables) > 0, "The report should contain a table.")
-        table = document.tables[0]
-        headers = [cell.text for cell in table.rows[0].cells]
+        self.assertTrue(len(document.tables) > 0)
+        headers = [cell.text for cell in document.tables[0].rows[0].cells]
         self.assertIn("Количество по списку", headers)
         self.assertIn("В строю", headers)
 
-        # Checking that a status cell has the expected multiline structure
-        # Adjust index as needed depending on column ordering
-        status_cell = table.rows[1].cells[6]
-        self.assertIn(
-            "0\nПодстрока 1\nПодстрока 2\nПодстрока 3\nПодстрока 4",
-            status_cell.text,
-        )
+        status_cell = document.tables[0].rows[1].cells[6]
+        self.assertIn("0\nПодстрока 1\nПодстрока 2\nПодстрока 3\nПодстрока 4", status_cell.text)
 
     def test_periodic_report_endpoint(self):
         date_from = "2025-01-10"
-        date_to = "2025-01-12"  # 3 days
+        date_to = "2025-01-12"
         url = f"/api/personnel/divisions/{self.dep.id}/periodic-report/?date_from={date_from}&date_to={date_to}"
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
-
         doc_buffer = io.BytesIO(response.content)
         document = Document(doc_buffer)
-
         titles = [p.text for p in document.paragraphs if "САПТЫҚ ТІЗІМІ" in p.text]
         self.assertEqual(len(titles), 3)
         self.assertIn("10.01.2025", titles[0])
@@ -246,10 +201,7 @@ class ReportGenerationTest(APITestCase):
         url = f"/api/personnel/divisions/{self.dep.id}/report/"
         response = self.client.get(url, {"format": "xlsx"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(
-            response["Content-Type"],
-            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+        self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     def test_report_endpoint_returns_pdf_file(self):
         url = f"/api/personnel/divisions/{self.dep.id}/report/"

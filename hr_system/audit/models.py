@@ -5,7 +5,7 @@ from django.contrib.contenttypes.models import ContentType
 
 
 class AuditLog(models.Model):
-    """Журнал аудита"""
+    """Журнал аудита операций в системе с привязкой к произвольному объекту."""
     ACTION_CHOICES = [
         ("CREATE", "Create"),
         ("UPDATE", "Update"),

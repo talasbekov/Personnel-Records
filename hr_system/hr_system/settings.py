@@ -1,19 +1,17 @@
 from pathlib import Path
-from datetime import timedelta  # Added for SIMPLE_JWT
+from datetime import timedelta
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Quick-start development settings - unsuitable for production
-
-SECRET_KEY = "django-insecure-dummy-key-for-now"  # Replace with a real secret in production
-DEBUG = True  # Turn off in production
-
+# SECURITY
+SECRET_KEY = "django-insecure-dummy-key-for-now"  # Заменить в production
+DEBUG = True  # Выключить в production
 ALLOWED_HOSTS = []
 
 # Application definition
-
 INSTALLED_APPS = [
+    "daphne",  # ASGI server for channels
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -24,7 +22,8 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
     "personnel",
     "audit",
-    "notifications",  # remove if the app does not exist in this codebase
+    "notifications",  # Удалить, если такого приложения нет
+    "channels",
 ]
 
 MIDDLEWARE = [
@@ -57,6 +56,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "hr_system.wsgi.application"
+ASGI_APPLICATION = "hr_system.asgi.application"
 
 # Database
 DATABASES = {
@@ -83,6 +83,7 @@ USE_TZ = True
 # Static files
 STATIC_URL = "static/"
 
+# Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Django REST Framework
@@ -117,4 +118,25 @@ SIMPLE_JWT = {
     "TOKEN_TYPE_CLAIM": "token_type",
     "TOKEN_USER_CLASS": "rest_framework_simplejwt.models.TokenUser",
     "JTI_CLAIM": "jti",
+}
+
+# Channels configuration
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
+        },
+    },
+}
+
+# Caching via Redis
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://127.0.0.1:6379/1",
+        "OPTIONS": {
+            "CLIENT_CLASS": "django_redis.client.DefaultClient",
+        },
+    }
 }

@@ -1,8 +1,15 @@
+from collections import defaultdict
+import datetime
+
 from django.db import models
 from django.contrib.auth.models import User
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
+from django.contrib.contenttypes.fields import GenericForeignKey
+from django.contrib.contenttypes.models import ContentType
 
+
+# --- Enums / Choices ---
 
 class DivisionType(models.TextChoices):
     COMPANY = "COMPANY", _("Company")
@@ -31,6 +38,8 @@ class UserRole(models.IntegerChoices):
     ROLE_5 = 5, _("Кадровый администратор подразделения")
     ROLE_6 = 6, _("Редактирование своего отдела")
 
+
+# --- Core Models ---
 
 class Division(models.Model):
     name = models.CharField(max_length=255)
@@ -163,6 +172,8 @@ class UserProfile(models.Model):
         return f"{self.user.username} - Role: {self.get_role_display()}"
 
 
+# --- Staffing and Vacancy ---
+
 class StaffingUnit(models.Model):
     division = models.ForeignKey(
         Division, on_delete=models.CASCADE, related_name="staffing_units"
@@ -217,6 +228,8 @@ class Vacancy(models.Model):
         return f"{self.title} - {self.staffing_unit.division.name}"
 
 
+# --- Status Update / Division Indicators ---
+
 class DivisionStatusUpdate(models.Model):
     division = models.ForeignKey(
         Division, on_delete=models.CASCADE, related_name="status_updates"
@@ -234,6 +247,8 @@ class DivisionStatusUpdate(models.Model):
         status = "Updated" if self.is_updated else "Not Updated"
         return f"{self.division.name} on {self.update_date}: {status}"
 
+
+# --- Audit Log ---
 
 class AuditLog(models.Model):
     OPERATION_CHOICES = [
@@ -270,6 +285,8 @@ class AuditLog(models.Model):
         return f"Op: {self.operation} by {self.user} at {self.timestamp}"
 
 
+# --- Reports ---
+
 class PersonnelReport(models.Model):
     division = models.ForeignKey(Division, on_delete=models.CASCADE)
     report_date = models.DateField()
@@ -288,6 +305,8 @@ class PersonnelReport(models.Model):
     def __str__(self):
         return f"Report for {self.division.name} on {self.report_date}"
 
+
+# --- Notifications and Secondment ---
 
 class Notification(models.Model):
     NOTIFICATION_TYPES = [
