@@ -276,6 +276,39 @@ class VacancyAPITest(APITestCase):
         Employee.objects.create(full_name='New Hire', division=self.division1, position=self.position)
         self.assertEqual(self.staffing_unit.vacant_count, 4)
 
+
+class RateLimitingTest(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(username='testuser', password='password')
+        UserProfile.objects.create(user=self.user, role=UserRole.ROLE_4)
+
+    def test_user_rate_limit(self):
+        """
+        Ensure that an authenticated user is rate-limited.
+        """
+        self.client.force_authenticate(user=self.user)
+        url = '/api/personnel/divisions/'
+
+        for i in range(101):
+            response = self.client.get(url)
+            if response.status_code == 429:
+                break
+
+        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
+    def test_anon_rate_limit(self):
+        """
+        Ensure that an anonymous user is rate-limited.
+        """
+        url = '/api/personnel/divisions/'
+
+        for i in range(101):
+            response = self.client.get(url)
+            if response.status_code == 429:
+                break
+
+        self.assertEqual(response.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
+
     def test_prevent_cyclical_division_dependency(self):
         """
         Test that creating a cyclical dependency in divisions is not allowed.
