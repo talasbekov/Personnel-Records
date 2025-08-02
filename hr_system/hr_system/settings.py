@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "personnel",  # Added personnel app
+    "audit",
     "rest_framework_simplejwt",  # Added for JWT authentication
 ]
 

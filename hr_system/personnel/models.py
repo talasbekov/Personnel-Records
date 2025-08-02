@@ -310,44 +310,6 @@ class DivisionStatusUpdate(models.Model):
         return f"{self.division.name} on {self.update_date}: {status_label}"
 
 
-class AuditLog(models.Model):
-    """Журнал аудита"""
-    OPERATION_CHOICES = [
-        ("CREATE", "Create"),
-        ("UPDATE", "Update"),
-        ("DELETE", "Delete"),
-        ("STATUS_CHANGE", "Status Change"),
-        ("TRANSFER", "Transfer"),
-        ("SECONDMENT", "Secondment"),
-        ("LOGIN", "Login"),
-        ("LOGOUT", "Logout"),
-        ("REPORT_GENERATED", "Report Generated"),
-        ("UNAUTHORIZED_ACCESS", "Unauthorized Access"),
-    ]
-
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
-    operation = models.CharField(max_length=30, choices=OPERATION_CHOICES)
-    model_name = models.CharField(max_length=50, blank=True, null=True)
-    object_id = models.PositiveIntegerField(null=True, blank=True)
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
-    details = models.JSONField(default=dict, blank=True)
-    ip_address = models.GenericIPAddressField(null=True, blank=True)
-    user_agent = models.TextField(blank=True)
-    session_id = models.CharField(max_length=255, blank=True)
-
-    class Meta:
-        ordering = ["-timestamp"]
-        indexes = [
-            models.Index(fields=["timestamp", "user"]),
-            models.Index(fields=["operation"]),
-        ]
-        verbose_name = "Audit Log"
-        verbose_name_plural = "Audit Logs"
-
-    def __str__(self):
-        return f"Op: {self.operation} by {self.user} at {self.timestamp}"
-
-
 class PersonnelReport(models.Model):
     """Сохраненные документы расхода"""
     division = models.ForeignKey(Division, on_delete=models.CASCADE)
