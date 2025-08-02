@@ -3,6 +3,8 @@ from django.dispatch import receiver
 from personnel.models import SecondmentRequest, EmployeeStatusLog, Vacancy, Employee
 from .models import Notification, NotificationType
 from django.contrib.auth.models import User
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 @receiver(post_save, sender=SecondmentRequest, dispatch_uid="create_secondment_notification")
 def create_secondment_notification(sender, instance, created, **kwargs):
@@ -26,6 +28,19 @@ def create_status_update_notification(sender, instance, created, **kwargs):
             title=f'Your status has been updated to {instance.get_status_display()}',
             message=f'Your status has been updated to "{instance.get_status_display()}" from {instance.date_from}.',
             payload={'status_log_id': instance.id, 'new_status': instance.status}
+        )
+
+        channel_layer = get_channel_layer()
+        async_to_sync(channel_layer.group_send)(
+            f'user_{instance.employee.user.id}_notifications',
+            {
+                'type': 'notification.message',
+                'message': {
+                    'type': 'status_update',
+                    'employee_id': instance.employee.id,
+                    'new_status': instance.status,
+                }
+            }
         )
 
 @receiver(post_save, sender=Vacancy, dispatch_uid="create_vacancy_notification")
