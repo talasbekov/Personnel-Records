@@ -166,7 +166,10 @@ class ReportGenerationTest(APITestCase):
         response = self.client.get(url)
 
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
         self.assertIn("attachment; filename=", response["Content-Disposition"])
 
         doc_buffer = io.BytesIO(response.content)
@@ -176,11 +179,13 @@ class ReportGenerationTest(APITestCase):
         self.assertIn("САПТЫҚ ТІЗІМІ", title_text)
 
         self.assertTrue(len(document.tables) > 0)
-        headers = [cell.text for cell in document.tables[0].rows[0].cells]
+        table = document.tables[0]
+        headers = [cell.text for cell in table.rows[0].cells]
         self.assertIn("Количество по списку", headers)
         self.assertIn("В строю", headers)
 
-        status_cell = document.tables[0].rows[1].cells[6]
+        # Check for the multiline structure in a status cell (adjust index if ordering changes)
+        status_cell = table.rows[1].cells[6]
         self.assertIn("0\nПодстрока 1\nПодстрока 2\nПодстрока 3\nПодстрока 4", status_cell.text)
 
     def test_periodic_report_endpoint(self):
@@ -189,6 +194,7 @@ class ReportGenerationTest(APITestCase):
         url = f"/api/personnel/divisions/{self.dep.id}/periodic-report/?date_from={date_from}&date_to={date_to}"
         response = self.client.get(url)
         self.assertEqual(response.status_code, 200)
+
         doc_buffer = io.BytesIO(response.content)
         document = Document(doc_buffer)
         titles = [p.text for p in document.paragraphs if "САПТЫҚ ТІЗІМІ" in p.text]
@@ -201,7 +207,10 @@ class ReportGenerationTest(APITestCase):
         url = f"/api/personnel/divisions/{self.dep.id}/report/"
         response = self.client.get(url, {"format": "xlsx"})
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response["Content-Type"], "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+        self.assertEqual(
+            response["Content-Type"],
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
 
     def test_report_endpoint_returns_pdf_file(self):
         url = f"/api/personnel/divisions/{self.dep.id}/report/"

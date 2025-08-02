@@ -1,6 +1,7 @@
 import pytest
 from django.contrib.auth.models import User
 from django.utils import timezone
+
 from personnel.models import (
     SecondmentRequest,
     EmployeeStatusLog,
@@ -10,9 +11,10 @@ from personnel.models import (
     Position,
     DivisionType,
     EmployeeStatusType,
+    UserProfile,
+    UserRole,
 )
 from notifications.models import Notification
-from personnel.models import UserProfile, UserRole
 
 # Optional imports for websocket test
 try:
@@ -30,7 +32,6 @@ def test_secondment_notification_created():
     division = Division.objects.create(name="Test Division", division_type=DivisionType.DEPARTMENT)
     position = Position.objects.create(name="Test Position", level=1)
     employee = Employee.objects.create(full_name="Test Employee", division=division, position=position)
-    # Ensure at least one superuser exists for recipient fallback
     SecondmentRequest.objects.create(
         employee=employee,
         from_division=division,
@@ -39,7 +40,7 @@ def test_secondment_notification_created():
         date_from=timezone.now().date(),
         reason="Test",
     )
-    # One notification for the secondment request (recipient is superuser)
+    # Expect exactly one notification (fallback recipient is superuser)
     assert Notification.objects.count() == 1
 
 
@@ -78,14 +79,12 @@ def test_vacancy_notification_created():
 
 @pytest.mark.django_db
 def test_employee_create_update_delete_notifications():
-    # Create user and employee
     user = User.objects.create_user(username="testuser2", password="password")
     division = Division.objects.create(name="Test Division", division_type=DivisionType.DEPARTMENT)
     position = Position.objects.create(name="Test Position", level=1)
     employee = Employee.objects.create(
         full_name="Test Employee", division=division, position=position, user=user
     )
-    # Creation notification (if logic emits on creation)
     initial_count = Notification.objects.count()
 
     # Update employee
@@ -120,7 +119,6 @@ async def test_status_update_sends_websocket_message(settings):
     )
 
     communicator = WebsocketCommunicator(application, f"/ws/notifications/")
-    # attach authenticated user to scope if authentication middleware expects it
     communicator.scope["user"] = user
     connected, _ = await communicator.connect()
     assert connected

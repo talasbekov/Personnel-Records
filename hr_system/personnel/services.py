@@ -1,5 +1,6 @@
 from collections import defaultdict
 import datetime
+import io
 
 from django.db import models
 from django.contrib.auth.models import User
@@ -7,6 +8,22 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
+
+# Document generation imports
+from docx import Document
+from docx.shared import Pt, Cm
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.section import WD_ORIENT
+
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment
+
+from reportlab.lib.pagesizes import landscape, letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, PageBreak
+from reportlab.lib.styles import getSampleStyleSheet
+from reportlab.lib import colors
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.pdfbase import pdfmetrics
 
 
 # --- Enums / Choices ---
@@ -40,6 +57,7 @@ class UserRole(models.IntegerChoices):
 
 
 # --- Core Models ---
+
 
 class Division(models.Model):
     name = models.CharField(max_length=255)
@@ -99,9 +117,7 @@ class Employee(models.Model):
         if date is None:
             date = timezone.now().date()
 
-        status_log = self.status_logs.filter(
-            date_from__lte=date
-        ).filter(
+        status_log = self.status_logs.filter(date_from__lte=date).filter(
             models.Q(date_to__gte=date) | models.Q(date_to__isnull=True)
         ).order_by("-date_from", "-id").first()
 
@@ -174,6 +190,7 @@ class UserProfile(models.Model):
 
 # --- Staffing and Vacancy ---
 
+
 class StaffingUnit(models.Model):
     division = models.ForeignKey(
         Division, on_delete=models.CASCADE, related_name="staffing_units"
@@ -230,6 +247,7 @@ class Vacancy(models.Model):
 
 # --- Status Update / Division Indicators ---
 
+
 class DivisionStatusUpdate(models.Model):
     division = models.ForeignKey(
         Division, on_delete=models.CASCADE, related_name="status_updates"
@@ -249,6 +267,7 @@ class DivisionStatusUpdate(models.Model):
 
 
 # --- Audit Log ---
+
 
 class AuditLog(models.Model):
     OPERATION_CHOICES = [
@@ -287,6 +306,7 @@ class AuditLog(models.Model):
 
 # --- Reports ---
 
+
 class PersonnelReport(models.Model):
     division = models.ForeignKey(Division, on_delete=models.CASCADE)
     report_date = models.DateField()
@@ -307,6 +327,7 @@ class PersonnelReport(models.Model):
 
 
 # --- Notifications and Secondment ---
+
 
 class Notification(models.Model):
     NOTIFICATION_TYPES = [
@@ -362,3 +383,430 @@ class SecondmentRequest(models.Model):
 
     def __str__(self):
         return f"{self.employee.full_name}: {self.from_division.name} → {self.to_division.name}"
+
+
+# --- Service Functions ---
+
+
+def _gather_descendant_ids(root_division):
+    descendant_ids = [root_division.id]
+    queue = [root_division]
+    visited = {root_division.id}
+    while queue:
+        current = queue.pop(0)
+        for child in current.child_divisions.all():
+            if child.id not in visited:
+                descendant_ids.append(child.id)
+                visited.add(child.id)
+                queue.append(child)
+    return descendant_ids
+
+
+def get_division_statistics(division: Division, on_date: datetime.date):
+    """
+    Calculates personnel statistics for a given division on a specific date.
+    """
+    # Collect division and descendants
+    all_division_ids = _gather_descendant_ids(division)
+
+    # Total staffing
+    total_staffing = StaffingUnit.objects.filter(
+        division_id__in=all_division_ids
+    ).aggregate(total=models.Sum("quantity"))["total"] or 0
+
+    # Employees on list (home division in scope)
+    employees_on_list = Employee.objects.filter(
+        division_id__in=all_division_ids,
+        is_active=True,
+        hired_date__lte=on_date,
+    ).exclude(fired_date__lte=on_date)
+
+    on_list_count = employees_on_list.count()
+
+    # Status breakdown
+    status_counts = defaultdict(int)
+    status_details = defaultdict(list)
+
+    for emp in employees_on_list:
+        status = emp.get_current_status(date=on_date)
+        status_counts[status] += 1
+
+        log_entry = emp.status_logs.filter(
+            date_from__lte=on_date,
+            status=status,
+        ).filter(
+            models.Q(date_to__gte=on_date) | models.Q(date_to__isnull=True)
+        ).order_by("-date_from", "-id").first()
+
+        details = {
+            "full_name": emp.full_name,
+            "comment": log_entry.comment if log_entry else "",
+            "date_from": log_entry.date_from if log_entry else None,
+            "date_to": log_entry.date_to if log_entry else None,
+        }
+        status_details[status].append(details)
+
+    in_lineup_count = status_counts[EmployeeStatusType.ON_DUTY_SCHEDULED]
+
+    # Seconded-in employees
+    seconded_in_requests = SecondmentRequest.objects.filter(
+        to_division_id__in=all_division_ids,
+        status="APPROVED",
+        date_from__lte=on_date,
+    ).filter(
+        models.Q(date_to__gte=on_date) | models.Q(date_to__isnull=True)
+    )
+    seconded_in_count = seconded_in_requests.count()
+
+    seconded_in_status_counts = defaultdict(int)
+    for req in seconded_in_requests:
+        status = req.employee.get_current_status(date=on_date)
+        seconded_in_status_counts[status] += 1
+
+    # Assemble
+    stats = {
+        "division_name": division.name,
+        "on_date": on_date,
+        "total_staffing": total_staffing,
+        "on_list_count": on_list_count,
+        "vacant_count": max(0, total_staffing - on_list_count),
+        "in_lineup_count": in_lineup_count,
+        "seconded_in_count": seconded_in_count,
+        "status_counts": dict(status_counts),
+        "seconded_in_status_counts": dict(seconded_in_status_counts),
+        "status_details": dict(status_details),
+    }
+
+    # Sanity checks
+    on_list_check = sum(v for v in status_counts.values())
+    assert on_list_count == on_list_check
+    non_lineup_sum = sum(v for k, v in status_counts.items() if k != EmployeeStatusType.ON_DUTY_SCHEDULED)
+    in_lineup_check = on_list_count - non_lineup_sum
+    assert in_lineup_count == in_lineup_check
+
+    return stats
+
+
+# --- Report Generation Helpers ---
+
+
+def _add_report_table_to_document(document: Document, division_stats: dict):
+    # Title
+    title_str = (
+        f"{division_stats['division_name']} ЖЕКЕ ҚҰРАМЫНЫҢ САПТЫҚ ТІЗІМІ "
+        f"{division_stats['on_date'].strftime('%d.%m.%Y')} ЖЫЛҒЫ"
+    )
+    title_paragraph = document.add_paragraph()
+    title_run = title_paragraph.add_run(title_str)
+    title_run.font.name = "Times New Roman"
+    title_run.font.size = Pt(16)
+    title_run.bold = True
+    title_paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # Table
+    status_columns = [
+        EmployeeStatusType.ON_DUTY_ACTUAL,
+        EmployeeStatusType.AFTER_DUTY,
+        EmployeeStatusType.BUSINESS_TRIP,
+        EmployeeStatusType.TRAINING_ETC,
+        EmployeeStatusType.ON_LEAVE,
+        EmployeeStatusType.SICK_LEAVE,
+        EmployeeStatusType.SECONDED_IN,
+        EmployeeStatusType.SECONDED_OUT,
+    ]
+    num_cols = 6 + len(status_columns)
+    table = document.add_table(rows=1, cols=num_cols)
+    table.style = "Table Grid"
+    table.autofit = False
+
+    # Headers
+    hdr_cells = table.rows[0].cells
+    headers = [
+        "№",
+        "Название управления",
+        "Количество по штату",
+        "Количество по списку",
+        "Вакантные должности",
+        "В строю",
+    ] + [s.label for s in status_columns]
+    for i, header_text in enumerate(headers):
+        cell = hdr_cells[i]
+        cell.text = header_text
+        run = cell.paragraphs[0].runs[0]
+        run.font.size = Pt(12)
+        run.bold = True
+        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # Data row
+    row_cells = table.add_row().cells
+    on_list_display = f"{division_stats['on_list_count']}"
+    if division_stats["seconded_in_count"] > 0:
+        on_list_display += f" +{division_stats['seconded_in_count']}"
+    data_row = [
+        "1",
+        division_stats["division_name"],
+        str(division_stats["total_staffing"]),
+        on_list_display,
+        str(division_stats["vacant_count"]),
+        str(division_stats["in_lineup_count"]),
+    ]
+    for status in status_columns:
+        count = division_stats["status_counts"].get(status, 0)
+        if status == EmployeeStatusType.SECONDED_IN:
+            count = division_stats["seconded_in_count"]
+        cell_content = (
+            f"{count}\nПодстрока 1\nПодстрока 2\nПодстрока 3\nПодстрока 4"
+        )
+        data_row.append(cell_content)
+
+    for i, cell_text in enumerate(data_row):
+        cell = row_cells[i]
+        cell.text = str(cell_text)
+        cell.paragraphs[0].runs[0].font.size = Pt(8)
+
+    # Total row
+    total_cells = table.add_row().cells
+    total_cells[1].text = "Общее"
+    total_cells[1].paragraphs[0].runs[0].bold = True
+    for i in range(2, num_cols):
+        total_cells[i].text = row_cells[i].text
+        total_cells[i].paragraphs[0].runs[0].bold = True
+
+
+def generate_expense_report_docx(division_stats: dict):
+    document = Document()
+    section = document.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width, section.page_height = section.page_height, section.page_width
+    section.left_margin = Cm(1.5)
+    section.right_margin = Cm(1.5)
+    section.top_margin = Cm(1.0)
+    section.bottom_margin = Cm(1.0)
+
+    _add_report_table_to_document(document, division_stats)
+
+    buffer = io.BytesIO()
+    document.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+def generate_expense_report_xlsx(division_stats: dict):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Expense Report"
+
+    title_str = (
+        f"{division_stats['division_name']} ЖЕКЕ ҚҰРАМЫНЫҢ САПТЫҚ ТІЗІМІ "
+        f"{division_stats['on_date'].strftime('%d.%m.%Y')} ЖЫЛҒЫ"
+    )
+    ws.merge_cells("A1:N1")
+    title_cell = ws["A1"]
+    title_cell.value = title_str
+    title_cell.font = Font(name="Times New Roman", size=16, bold=True)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    status_columns = [
+        EmployeeStatusType.ON_DUTY_ACTUAL,
+        EmployeeStatusType.AFTER_DUTY,
+        EmployeeStatusType.BUSINESS_TRIP,
+        EmployeeStatusType.TRAINING_ETC,
+        EmployeeStatusType.ON_LEAVE,
+        EmployeeStatusType.SICK_LEAVE,
+        EmployeeStatusType.SECONDED_IN,
+        EmployeeStatusType.SECONDED_OUT,
+    ]
+    headers = [
+        "№",
+        "Название управления",
+        "Количество по штату",
+        "Количество по списку",
+        "Вакантные должности",
+        "В строю",
+    ] + [s.label for s in status_columns]
+    ws.append(headers)
+    for cell in ws[2]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+
+    on_list_display = f"{division_stats['on_list_count']}"
+    if division_stats["seconded_in_count"] > 0:
+        on_list_display += f" +{division_stats['seconded_in_count']}"
+    data_row = [
+        "1",
+        division_stats["division_name"],
+        str(division_stats["total_staffing"]),
+        on_list_display,
+        str(division_stats["vacant_count"]),
+        str(division_stats["in_lineup_count"]),
+    ]
+    for status in status_columns:
+        count = division_stats["status_counts"].get(status, 0)
+        if status == EmployeeStatusType.SECONDED_IN:
+            count = division_stats["seconded_in_count"]
+        cell_content = (
+            f"{count}\nПодстрока 1\nПодстрока 2\nПодстрока 3\nПодстрока 4"
+        )
+        data_row.append(cell_content)
+    ws.append(data_row)
+    for cell in ws[3]:
+        cell.alignment = Alignment(wrap_text=True)
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+def _create_pdf_page_content(division_stats, styles):
+    title_str = (
+        f"{division_stats['division_name']} ЖЕКЕ ҚҰРАМЫНЫҢ САПТЫҚ ТІЗІМІ "
+        f"{division_stats['on_date'].strftime('%d.%m.%Y')} ЖЫЛҒЫ"
+    )
+    title = Paragraph(title_str, styles["h1"])
+
+    status_columns = [
+        EmployeeStatusType.ON_DUTY_ACTUAL,
+        EmployeeStatusType.AFTER_DUTY,
+        EmployeeStatusType.BUSINESS_TRIP,
+        EmployeeStatusType.TRAINING_ETC,
+        EmployeeStatusType.ON_LEAVE,
+        EmployeeStatusType.SICK_LEAVE,
+        EmployeeStatusType.SECONDED_IN,
+        EmployeeStatusType.SECONDED_OUT,
+    ]
+    headers = [
+        "№",
+        "Название управления",
+        "Количество по штату",
+        "Количество по списку",
+        "Вакантные должности",
+        "В строю",
+    ] + [s.label for s in status_columns]
+
+    on_list_display = f"{division_stats['on_list_count']}"
+    if division_stats["seconded_in_count"] > 0:
+        on_list_display += f" +{division_stats['seconded_in_count']}"
+
+    data_row = [
+        "1",
+        division_stats["division_name"],
+        str(division_stats["total_staffing"]),
+        on_list_display,
+        str(division_stats["vacant_count"]),
+        str(division_stats["in_lineup_count"]),
+    ]
+    row_paragraphs = []
+    for status in status_columns:
+        count = division_stats["status_counts"].get(status, 0)
+        if status == EmployeeStatusType.SECONDED_IN:
+            count = division_stats["seconded_in_count"]
+        cell_content = (
+            f"{count}\nПодстрока 1\nПодстрока 2\nПодстрока 3\nПодстрока 4"
+        )
+        row_paragraphs.append(Paragraph(cell_content.replace("\n", "<br/>"), styles["BodyText"]))
+
+    table_data = [headers, data_row + row_paragraphs]
+
+    style = TableStyle(
+        [
+            ("BACKGROUND", (0, 0), (-1, 0), colors.grey),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.whitesmoke),
+            ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+            ("BOTTOMPADDING", (0, 0), (-1, 0), 12),
+            ("BACKGROUND", (0, 1), (-1, -1), colors.beige),
+            ("GRID", (0, 0), (-1, -1), 1, colors.black),
+        ]
+    )
+
+    table = Table(table_data)
+    table.setStyle(style)
+
+    return [title, table]
+
+
+def generate_expense_report_pdf(division_stats: dict):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter))
+
+    try:
+        pdfmetrics.registerFont(TTFont("Times-Roman", "times.ttf"))
+        main_font = "Times-Roman"
+    except Exception:
+        main_font = "Helvetica"
+
+    styles = getSampleStyleSheet()
+    styles["h1"].fontName = main_font
+    styles["BodyText"].fontName = main_font
+
+    elements = _create_pdf_page_content(division_stats, styles)
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer
+
+
+def generate_periodic_report_docx(division: Division, date_from: datetime.date, date_to: datetime.date):
+    document = Document()
+    section = document.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width, section.page_height = section.page_height, section.page_width
+
+    current_date = date_from
+    while current_date <= date_to:
+        stats = get_division_statistics(division, current_date)
+        _add_report_table_to_document(document, stats)
+        if current_date < date_to:
+            document.add_page_break()
+        current_date += datetime.timedelta(days=1)
+
+    buffer = io.BytesIO()
+    document.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+def generate_periodic_report_xlsx(division: Division, date_from: datetime.date, date_to: datetime.date):
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    current_date = date_from
+    while current_date <= date_to:
+        stats = get_division_statistics(division, current_date)
+        ws = wb.create_sheet(title=current_date.strftime("%Y-%m-%d"))
+        ws.append([f"Report for {current_date.strftime('%d.%m.%Y')}"])
+        current_date += datetime.timedelta(days=1)
+
+    buffer = io.BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return buffer
+
+
+def generate_periodic_report_pdf(division: Division, date_from: datetime.date, date_to: datetime.date):
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(letter))
+
+    try:
+        pdfmetrics.registerFont(TTFont("Times-Roman", "times.ttf"))
+        main_font = "Times-Roman"
+    except Exception:
+        main_font = "Helvetica"
+
+    styles = getSampleStyleSheet()
+    styles["h1"].fontName = main_font
+    styles["BodyText"].fontName = main_font
+
+    elements = []
+    current_date = date_from
+    while current_date <= date_to:
+        stats = get_division_statistics(division, current_date)
+        elements.extend(_create_pdf_page_content(stats, styles))
+        if current_date < date_to:
+            elements.append(PageBreak())
+        current_date += datetime.timedelta(days=1)
+
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer

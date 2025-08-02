@@ -10,6 +10,8 @@ from .models import (
     DivisionType,
     SecondmentRequest,
     EmployeeStatusType,
+    StaffingUnit,
+    Vacancy,
 )
 from .serializers import (
     DivisionSerializer,
@@ -21,6 +23,8 @@ from .serializers import (
     StatusUpdateItemSerializer,
     EmployeeTransferSerializer,
     SecondmentRequestSerializer,
+    StaffingUnitSerializer,
+    VacancySerializer,
 )
 from rest_framework_simplejwt.views import TokenObtainPairView as OriginalTokenObtainPairView
 from .permissions import IsRole4, IsRole1, IsRole2, IsRole3, IsRole5, IsRole6, IsReadOnly
@@ -430,6 +434,18 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
         )
 
         return Response(self.get_serializer(instance).data)
+
+
+class VacancyViewSet(viewsets.ModelViewSet):
+    queryset = Vacancy.objects.all().select_related('staffing_unit__division', 'staffing_unit__position', 'created_by', 'closed_by')
+    serializer_class = VacancySerializer
+    permission_classes = [IsRole4 | IsRole5]
+
+
+class StaffingUnitViewSet(viewsets.ModelViewSet):
+    queryset = StaffingUnit.objects.all().select_related('division', 'position')
+    serializer_class = StaffingUnitSerializer
+    permission_classes = [IsRole4 | IsRole5]
 
     @action(detail=True, methods=["post"], permission_classes=[IsRole4 | IsRole5])
     def reject(self, request, pk=None):

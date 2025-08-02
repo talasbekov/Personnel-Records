@@ -10,6 +10,8 @@ from .models import (
     UserRole,
     EmployeeStatusType,
     SecondmentRequest,
+    StaffingUnit,
+    Vacancy,
 )
 from django.db.models import Q
 from rest_framework_simplejwt.serializers import (
@@ -227,6 +229,48 @@ class EmployeeStatusLogSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data["created_by"] = self.context["request"].user
+        return super().create(validated_data)
+
+
+class StaffingUnitSerializer(serializers.ModelSerializer):
+    division_id = serializers.PrimaryKeyRelatedField(
+        queryset=Division.objects.all(), source='division'
+    )
+    position_id = serializers.PrimaryKeyRelatedField(
+        queryset=Position.objects.all(), source='position'
+    )
+    division = DivisionSerializer(read_only=True)
+    position = PositionSerializer(read_only=True)
+
+    class Meta:
+        model = StaffingUnit
+        fields = [
+            'id', 'division', 'division_id', 'position', 'position_id',
+            'quantity', 'occupied_count', 'vacant_count',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['occupied_count', 'vacant_count', 'created_at', 'updated_at']
+
+
+class VacancySerializer(serializers.ModelSerializer):
+    staffing_unit_id = serializers.PrimaryKeyRelatedField(
+        queryset=StaffingUnit.objects.all(), source='staffing_unit'
+    )
+    staffing_unit = StaffingUnitSerializer(read_only=True)
+    created_by = UserSerializer(read_only=True)
+    closed_by = UserSerializer(read_only=True)
+
+    class Meta:
+        model = Vacancy
+        fields = [
+            'id', 'staffing_unit', 'staffing_unit_id', 'title', 'description',
+            'requirements', 'priority', 'is_active', 'created_at', 'created_by',
+            'closed_at', 'closed_by'
+        ]
+        read_only_fields = ['created_at', 'created_by', 'closed_at', 'closed_by']
+
+    def create(self, validated_data):
+        validated_data['created_by'] = self.context['request'].user
         return super().create(validated_data)
 
 
