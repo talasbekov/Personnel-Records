@@ -8,6 +8,8 @@ from .models import (
     UserRole,
     DivisionStatusUpdate,
     DivisionType,
+    SecondmentRequest,
+    EmployeeStatusType,
 )
 from .serializers import (
     DivisionSerializer,
@@ -17,6 +19,8 @@ from .serializers import (
     MyTokenObtainPairSerializer,
     EmployeeStatusLogSerializer,
     StatusUpdateItemSerializer,
+    EmployeeTransferSerializer,
+    SecondmentRequestSerializer,
 )
 from rest_framework_simplejwt.views import TokenObtainPairView as OriginalTokenObtainPairView
 from .permissions import IsRole4, IsRole1, IsRole2, IsRole3, IsRole5, IsRole6, IsReadOnly
@@ -278,6 +282,49 @@ class EmployeeViewSet(viewsets.ModelViewSet):
 
         return Employee.objects.none()
 
+    @action(detail=True, methods=["post"], permission_classes=[IsRole4 | IsRole5])
+    def terminate(self, request, pk=None):
+        employee = self.get_object()
+        employee.is_active = False
+        employee.fired_date = datetime.date.today()
+        employee.save()
+        return Response(
+            {"status": f"Employee {employee.full_name} has been terminated."},
+            status=status.HTTP_200_OK,
+        )
+
+    @action(detail=True, methods=["post"], permission_classes=[IsRole4 | IsRole5])
+    def transfer(self, request, pk=None):
+        employee = self.get_object()
+        serializer = EmployeeTransferSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        new_division_id = serializer.validated_data["new_division_id"]
+        try:
+            new_division = Division.objects.get(id=new_division_id)
+        except Division.DoesNotExist:
+            return Response({"error": "Target division does not exist."}, status=status.HTTP_400_BAD_REQUEST)
+
+        profile = request.user.profile
+        if profile.role == UserRole.ROLE_5:
+            scope_checker = IsRole5()
+            # assuming has_object_permission takes (request, view, obj)
+            if not scope_checker.has_object_permission(request, self, employee.division) or not scope_checker.has_object_permission(
+                request, self, new_division
+            ):
+                return Response(
+                    {"error": "You can only transfer employees within your assigned division scope."},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        employee.division = new_division
+        employee.save()
+        return Response(
+            {"status": f"Employee {employee.full_name} transferred to {new_division.name}."},
+            status=status.HTTP_200_OK,
+        )
+
 
 class UserProfileViewSet(viewsets.ModelViewSet):
     queryset = UserProfile.objects.all().select_related("user", "division_assignment")
@@ -287,3 +334,46 @@ class UserProfileViewSet(viewsets.ModelViewSet):
 
 class MyTokenObtainPairView(OriginalTokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
+
+
+class SecondmentRequestViewSet(viewsets.ModelViewSet):
+    queryset = SecondmentRequest.objects.all().select_related(
+        "employee__position", "from_division", "to_division", "requested_by", "approved_by"
+    )
+    serializer_class = SecondmentRequestSerializer
+    permission_classes = [IsRole4 | IsRole5]  # Basic; per-action refinement can be added
+
+    def perform_create(self, serializer):
+        serializer.save()
+
+    @action(detail=True, methods=["post"], permission_classes=[IsRole4 | IsRole5])
+    def approve(self, request, pk=None):
+        instance = self.get_object()
+        if instance.status != "PENDING":
+            return Response({"error": "Only pending requests can be approved."}, status=status.HTTP_400_BAD_REQUEST)
+
+        instance.status = "APPROVED"
+        instance.approved_by = request.user
+        instance.save()
+
+        EmployeeStatusLog.objects.create(
+            employee=instance.employee,
+            status=EmployeeStatusType.SECONDED_OUT,
+            date_from=instance.date_from,
+            date_to=instance.date_to,
+            comment=f"Seconded to {instance.to_division.name}",
+            secondment_division=instance.to_division,
+            created_by=request.user,
+        )
+
+        return Response(self.get_serializer(instance).data)
+
+    @action(detail=True, methods=["post"], permission_classes=[IsRole4 | IsRole5])
+    def reject(self, request, pk=None):
+        instance = self.get_object()
+        if instance.status != "PENDING":
+            return Response({"error": "Only pending requests can be rejected."}, status=status.HTTP_400_BAD_REQUEST)
+
+        instance.status = "REJECTED"
+        instance.save()
+        return Response(self.get_serializer(instance).data)

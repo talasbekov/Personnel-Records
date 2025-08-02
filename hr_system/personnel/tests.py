@@ -8,7 +8,6 @@ class PositionAPITest(APITestCase):
     Tests for the Position API. It relies on the data from the seed migration.
     """
     def setUp(self):
-        # We need a user to authenticate
         self.user = User.objects.create_user(username='testuser', password='testpassword')
         UserProfile.objects.create(user=self.user, role=UserRole.ROLE_4)
         self.client.force_authenticate(user=self.user)
@@ -20,7 +19,6 @@ class PositionAPITest(APITestCase):
         url = '/api/personnel/positions/'
         response = self.client.get(url, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        # Assuming the migration has run, we should have 20 positions
         self.assertEqual(response.data.get('count'), 20)
 
     def test_retrieve_position(self):
@@ -77,7 +75,6 @@ class DivisionEmployeeAPITest(APITestCase):
         response = self.client.put(url, data, format='json')
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        # Expect an error about setting a child as its own parent / cyclical relationship
         self.assertIn("children as its parent", response.data.get('non_field_errors', [''])[0])
 
     def test_prevent_deleting_division_with_children(self):
@@ -112,8 +109,12 @@ class DivisionEmployeeAPITest(APITestCase):
         senior_position = Position.objects.create(name="Старший", level=10)
         junior_position = Position.objects.create(name="Младший", level=20)
 
-        employee_junior = Employee.objects.create(full_name="Боб Младший", position=junior_position, division=self.division)
-        employee_senior = Employee.objects.create(full_name="Алиса Старшая", position=senior_position, division=self.division)
+        employee_junior = Employee.objects.create(
+            full_name="Боб Младший", position=junior_position, division=self.division
+        )
+        employee_senior = Employee.objects.create(
+            full_name="Алиса Старшая", position=senior_position, division=self.division
+        )
 
         url = '/api/personnel/employees/'
         response = self.client.get(url, format='json')
@@ -126,14 +127,22 @@ class DivisionEmployeeAPITest(APITestCase):
         senior_index = names_in_response.index(employee_senior.full_name)
         junior_index = names_in_response.index(employee_junior.full_name)
 
-        self.assertLess(senior_index, junior_index, "Senior employee should appear before junior employee in the list.")
+        self.assertLess(
+            senior_index,
+            junior_index,
+            "Senior employee should appear before junior employee in the list.",
+        )
 
     def test_employee_crud_lifecycle(self):
         """
         Test creating, retrieving, updating, and deleting an employee.
         """
         url = '/api/personnel/employees/'
-        data = {'full_name': 'Тестовый Сотрудник', 'position_id': self.position.id, 'division_id': self.division.id}
+        data = {
+            'full_name': 'Тестовый Сотрудник',
+            'position_id': self.position.id,
+            'division_id': self.division.id,
+        }
         response = self.client.post(url, data, format='json')
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         new_employee_id = response.data.get('id')
@@ -144,7 +153,11 @@ class DivisionEmployeeAPITest(APITestCase):
         self.assertEqual(response.data.get('full_name'), 'Тестовый Сотрудник')
 
         new_position = Position.objects.create(name="Новая должность", level=100)
-        update_data = {'full_name': 'Обновленный Сотрудник', 'position_id': new_position.id, 'division_id': self.division.id}
+        update_data = {
+            'full_name': 'Обновленный Сотрудник',
+            'position_id': new_position.id,
+            'division_id': self.division.id,
+        }
         response = self.client.put(retrieve_url, update_data, format='json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
 
