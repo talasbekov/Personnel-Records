@@ -24,7 +24,7 @@ INSTALLED_APPS = [
     "rest_framework_simplejwt",
     "personnel",
     "audit",
-    "notifications",  # remove if the app is not present
+    "notifications",  # remove if the app does not exist in this codebase
 ]
 
 MIDDLEWARE = [
