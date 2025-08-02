@@ -15,7 +15,7 @@ router.register(r"positions", PositionViewSet)
 router.register(r"employees", EmployeeViewSet, basename="employee")
 router.register(r"user-profiles", UserProfileViewSet)
 router.register(r"secondment-requests", SecondmentRequestViewSet)
-router.register(r'status-logs', EmployeeStatusLogViewSet)
+router.register(r"status-logs", EmployeeStatusLogViewSet)
 
 urlpatterns = [
     path("", include(router.urls)),
