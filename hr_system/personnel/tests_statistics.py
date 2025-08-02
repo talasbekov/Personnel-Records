@@ -125,3 +125,8 @@ class ReportGenerationTest(APITestCase):
         headers = [cell.text for cell in table.rows[0].cells]
         self.assertIn("Количество по списку", headers)
         self.assertIn("В строю", headers)
+
+        # Check for the new structure in a status cell
+        # The 7th column (index 6) is the first status column 'На дежурстве'
+        status_cell = table.rows[1].cells[6]
+        self.assertIn("0\nПодстрока 1\nПодстрока 2\nПодстрока 3\nПодстрока 4", status_cell.text)
