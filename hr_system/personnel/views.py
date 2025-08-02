@@ -1,5 +1,5 @@
 from rest_framework import viewsets, permissions, status
-from .models import Division, Position, Employee, UserProfile, EmployeeStatusLog, UserRole, DivisionStatusUpdate, DivisionType
+from .models import Division, Position, Employee, UserProfile, EmployeeStatusLog, UserRole, DivisionStatusUpdate, DivisionType, SecondmentRequest, EmployeeStatusType
 from .serializers import (
     DivisionSerializer,
     PositionSerializer,
@@ -8,7 +8,8 @@ from .serializers import (
     MyTokenObtainPairSerializer,
     EmployeeStatusLogSerializer,
     StatusUpdateItemSerializer,
-    EmployeeTransferSerializer
+    EmployeeTransferSerializer,
+    SecondmentRequestSerializer
 )
 from rest_framework_simplejwt.views import TokenObtainPairView as OriginalTokenObtainPairView
 from .permissions import IsRole4, IsRole1, IsRole2, IsRole3, IsRole5, IsRole6, IsReadOnly
@@ -232,3 +233,52 @@ class UserProfileViewSet(viewsets.ModelViewSet):
 
 class MyTokenObtainPairView(OriginalTokenObtainPairView):
     serializer_class = MyTokenObtainPairSerializer
+
+
+class SecondmentRequestViewSet(viewsets.ModelViewSet):
+    queryset = SecondmentRequest.objects.all().select_related(
+        'employee__position', 'from_division', 'to_division', 'requested_by', 'approved_by'
+    )
+    serializer_class = SecondmentRequestSerializer
+    permission_classes = [IsRole4 | IsRole5] # Basic permissions, will be refined per-action
+
+    def perform_create(self, serializer):
+        # The serializer's create method handles setting from_division and requested_by
+        serializer.save()
+
+    @action(detail=True, methods=['post'], permission_classes=[IsRole4 | IsRole5])
+    def approve(self, request, pk=None):
+        instance = self.get_object()
+        if instance.status != 'PENDING':
+            return Response({'error': 'Only pending requests can be approved.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # The permission_classes on the action will handle the permission check automatically now.
+
+        instance.status = 'APPROVED'
+        instance.approved_by = request.user
+        instance.save()
+
+        # Create the SECONDED_OUT status log for the employee
+        EmployeeStatusLog.objects.create(
+            employee=instance.employee,
+            status=EmployeeStatusType.SECONDED_OUT,
+            date_from=instance.date_from,
+            date_to=instance.date_to,
+            comment=f"Seconded to {instance.to_division.name}",
+            secondment_division=instance.to_division,
+            created_by=request.user
+        )
+
+        return Response(self.get_serializer(instance).data)
+
+    @action(detail=True, methods=['post'], permission_classes=[IsRole4 | IsRole5])
+    def reject(self, request, pk=None):
+        instance = self.get_object()
+        if instance.status != 'PENDING':
+            return Response({'error': 'Only pending requests can be rejected.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # TODO: Add permission check
+
+        instance.status = 'REJECTED'
+        instance.save()
+        return Response(self.get_serializer(instance).data)

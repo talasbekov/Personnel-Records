@@ -9,6 +9,7 @@ from .models import (
     DivisionType,
     UserRole,
     EmployeeStatusType,
+    SecondmentRequest,
 )
 from rest_framework_simplejwt.serializers import (
     TokenObtainPairSerializer,
@@ -229,3 +230,35 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
             token["role"] = None
             token["division_id"] = None
         return token
+
+
+class SecondmentRequestSerializer(serializers.ModelSerializer):
+    employee_id = serializers.PrimaryKeyRelatedField(
+        queryset=Employee.objects.all(), source='employee'
+    )
+    to_division_id = serializers.PrimaryKeyRelatedField(
+        queryset=Division.objects.all(), source='to_division'
+    )
+
+    employee = EmployeeSerializer(read_only=True)
+    from_division = DivisionSerializer(read_only=True)
+    to_division = DivisionSerializer(read_only=True)
+    requested_by = UserSerializer(read_only=True)
+    approved_by = UserSerializer(read_only=True)
+
+    class Meta:
+        model = SecondmentRequest
+        fields = [
+            'id', 'employee', 'employee_id', 'from_division', 'to_division', 'to_division_id',
+            'status', 'date_from', 'date_to', 'reason', 'requested_by', 'approved_by',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'status', 'from_division', 'requested_by', 'approved_by', 'created_at', 'updated_at'
+        ]
+
+    def create(self, validated_data):
+        employee = validated_data['employee']
+        validated_data['from_division'] = employee.division
+        validated_data['requested_by'] = self.context['request'].user
+        return super().create(validated_data)
