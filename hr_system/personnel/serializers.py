@@ -10,6 +10,7 @@ from .models import (
     UserRole,
     EmployeeStatusType,
     SecondmentRequest,
+    StaffingUnit,
 )
 from django.db.models import Q
 from rest_framework_simplejwt.serializers import (
@@ -228,6 +229,26 @@ class EmployeeStatusLogSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data["created_by"] = self.context["request"].user
         return super().create(validated_data)
+
+
+class StaffingUnitSerializer(serializers.ModelSerializer):
+    division_id = serializers.PrimaryKeyRelatedField(
+        queryset=Division.objects.all(), source='division'
+    )
+    position_id = serializers.PrimaryKeyRelatedField(
+        queryset=Position.objects.all(), source='position'
+    )
+    division = DivisionSerializer(read_only=True)
+    position = PositionSerializer(read_only=True)
+
+    class Meta:
+        model = StaffingUnit
+        fields = [
+            'id', 'division', 'division_id', 'position', 'position_id',
+            'quantity', 'occupied_count', 'vacant_count',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = ['occupied_count', 'vacant_count', 'created_at', 'updated_at']
 
 
 class StatusUpdateItemSerializer(serializers.Serializer):

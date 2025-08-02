@@ -10,6 +10,7 @@ from .models import (
     DivisionType,
     SecondmentRequest,
     EmployeeStatusType,
+    StaffingUnit,
 )
 from .serializers import (
     DivisionSerializer,
@@ -21,6 +22,7 @@ from .serializers import (
     StatusUpdateItemSerializer,
     EmployeeTransferSerializer,
     SecondmentRequestSerializer,
+    StaffingUnitSerializer,
 )
 from rest_framework_simplejwt.views import TokenObtainPairView as OriginalTokenObtainPairView
 from .permissions import IsRole4, IsRole1, IsRole2, IsRole3, IsRole5, IsRole6, IsReadOnly
@@ -30,6 +32,8 @@ from django.db.models import Q
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.http import HttpResponse
+from django.utils.decorators import method_decorator
+from django.views.decorators.cache import cache_page
 
 
 def _gather_descendant_ids(root_division):
@@ -52,6 +56,10 @@ def _gather_descendant_ids(root_division):
 class DivisionViewSet(viewsets.ModelViewSet):
     serializer_class = DivisionSerializer
     permission_classes = [IsRole4 | (IsReadOnly & (IsRole1 | IsRole2 | IsRole3 | IsRole5 | IsRole6))]
+
+    @method_decorator(cache_page(60 * 15))
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -152,21 +160,73 @@ class DivisionViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=["get"], url_path="report")
     def report(self, request, pk=None):
         """
-        Generates and returns the .docx expense report for this division.
+        Generates and returns an expense report for this division in the specified format.
         """
         division = self.get_object()
         report_date = datetime.date.today()
+        output_format = request.query_params.get('format', 'docx')
 
-        from .services import get_division_statistics, generate_expense_report_docx
+        from .services import get_division_statistics, generate_expense_report_docx, generate_expense_report_xlsx, generate_expense_report_pdf
 
         stats = get_division_statistics(division, report_date)
-        doc_buffer = generate_expense_report_docx(stats)
 
-        response = HttpResponse(
-            doc_buffer.read(),
-            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        )
-        response["Content-Disposition"] = f'attachment; filename="expense_report_{division.name}_{report_date}.docx"'
+        if output_format == 'docx':
+            buffer = generate_expense_report_docx(stats)
+            content_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            filename = f'expense_report_{division.name}_{report_date}.docx'
+        elif output_format == 'xlsx':
+            buffer = generate_expense_report_xlsx(stats)
+            content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            filename = f'expense_report_{division.name}_{report_date}.xlsx'
+        elif output_format == 'pdf':
+            buffer = generate_expense_report_pdf(stats)
+            content_type = 'application/pdf'
+            filename = f'expense_report_{division.name}_{report_date}.pdf'
+        else:
+            return Response({"error": "Invalid format specified. Use 'docx', 'xlsx', or 'pdf'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        response = HttpResponse(buffer.read(), content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+
+    @action(detail=True, methods=["get"], url_path="periodic-report")
+    def periodic_report(self, request, pk=None):
+        """
+        Generates and returns an expense report for a date range in the specified format.
+        """
+        division = self.get_object()
+        date_from_str = request.query_params.get('date_from')
+        date_to_str = request.query_params.get('date_to')
+        output_format = request.query_params.get('format', 'docx')
+
+        if not date_from_str or not date_to_str:
+            return Response({"error": "Please provide 'date_from' and 'date_to' query parameters."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            date_from = datetime.date.fromisoformat(date_from_str)
+            date_to = datetime.date.fromisoformat(date_to_str)
+        except ValueError:
+            return Response({"error": "Invalid date format. Please use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+
+        from .services import generate_periodic_report_docx, generate_periodic_report_xlsx, generate_periodic_report_pdf
+
+        if output_format == 'docx':
+            buffer = generate_periodic_report_docx(division, date_from, date_to)
+            content_type = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            filename = f'periodic_report_{division.name}_{date_from_str}_to_{date_to_str}.docx'
+        elif output_format == 'xlsx':
+            buffer = generate_periodic_report_xlsx(division, date_from, date_to)
+            content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            filename = f'periodic_report_{division.name}_{date_from_str}_to_{date_to_str}.xlsx'
+        elif output_format == 'pdf':
+            buffer = generate_periodic_report_pdf(division, date_from, date_to)
+            content_type = 'application/pdf'
+            filename = f'periodic_report_{division.name}_{date_from_str}_to_{date_to_str}.pdf'
+        else:
+            return Response({"error": "Invalid format specified. Use 'docx', 'xlsx', or 'pdf'."}, status=status.HTTP_400_BAD_REQUEST)
+
+        response = HttpResponse(buffer.read(), content_type=content_type)
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
         return response
 
     @action(detail=False, methods=["get"], url_path="status-summary")
@@ -242,6 +302,10 @@ class PositionViewSet(viewsets.ModelViewSet):
     queryset = Position.objects.all()
     serializer_class = PositionSerializer
     permission_classes = [IsRole4 | (IsReadOnly & permissions.IsAuthenticated)]
+
+    @method_decorator(cache_page(60 * 15))
+    def list(self, request, *args, **kwargs):
+        return super().list(request, *args, **kwargs)
 
 
 class EmployeeViewSet(viewsets.ModelViewSet):
@@ -368,6 +432,12 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
         )
 
         return Response(self.get_serializer(instance).data)
+
+
+class StaffingUnitViewSet(viewsets.ModelViewSet):
+    queryset = StaffingUnit.objects.all().select_related('division', 'position')
+    serializer_class = StaffingUnitSerializer
+    permission_classes = [IsRole4 | IsRole5]
 
     @action(detail=True, methods=["post"], permission_classes=[IsRole4 | IsRole5])
     def reject(self, request, pk=None):
