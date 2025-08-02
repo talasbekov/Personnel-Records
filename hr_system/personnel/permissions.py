@@ -1,5 +1,5 @@
 from rest_framework.permissions import BasePermission, SAFE_METHODS
-from .models import UserRole, Employee, EmployeeStatusType, DivisionType, Division
+from .models import UserRole, Employee, EmployeeStatusType, DivisionType, Division, SecondmentRequest
 
 class IsReadOnly(BasePermission):
     """
@@ -105,6 +105,13 @@ class IsRole5(BaseRolePermission):
             target_division = obj.division
         elif isinstance(obj, Division):
             target_division = obj
+        elif isinstance(obj, SecondmentRequest):
+            # For approvals/rejections, the relevant division is the target division
+            if view.action in ['approve', 'reject']:
+                target_division = obj.to_division
+            # For creation, we might check the source division
+            else:
+                target_division = obj.from_division
 
         if not target_division:
             return False

@@ -1,19 +1,43 @@
+import json
 from django.db import models
 from django.contrib.auth.models import User
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+
+# --- Enums and Choices ---
 
 class DivisionType(models.TextChoices):
     COMPANY = "COMPANY", _("Company")
     DEPARTMENT = "DEPARTMENT", _("Департамент")
     MANAGEMENT = "MANAGEMENT", _("Управление")
-    OFFICE = "OFFICE", _(
-        "Отдел"
-    )  # Changed from 'Отдел' to 'OFFICE' for programmatic consistency
+    OFFICE = "OFFICE", _("Отдел")
 
+
+class EmployeeStatusType(models.TextChoices):
+    ON_DUTY_SCHEDULED = "IN_LINEUP", _("В строю")
+    ON_DUTY_ACTUAL = "ON_DUTY", _("На дежурстве")
+    AFTER_DUTY = "AFTER_DUTY", _("После дежурства")
+    BUSINESS_TRIP = "BUSINESS_TRIP", _("В командировке")
+    TRAINING_ETC = "TRAINING_ETC", _("Учёба / Соревнования / Конференция")
+    ON_LEAVE = "ON_LEAVE", _("В отпуске")
+    SICK_LEAVE = "SICK_LEAVE", _("На больничном")
+    SECONDED_OUT = "SECONDED_OUT", _("Откомандирован")
+    SECONDED_IN = "SECONDED_IN", _("Прикомандирован")
+
+
+class UserRole(models.IntegerChoices):
+    ROLE_1 = 1, _("Просмотр всей организации (без редактирования)")
+    ROLE_2 = 2, _("Просмотр своего департамента (без редактирования)")
+    ROLE_3 = 3, _("Редактирование своего управления")
+    ROLE_4 = 4, _("Полный доступ (администратор)")
+    ROLE_5 = 5, _("Кадровый администратор подразделения")
+    ROLE_6 = 6, _("Редактирование своего отдела")
+
+
+# --- Core Models ---
 
 class Division(models.Model):
-    # division_id is implicitly created as 'id' (AutoField)
     name = models.CharField(max_length=255)
     parent_division = models.ForeignKey(
         "self",
@@ -32,11 +56,8 @@ class Division(models.Model):
 
 
 class Position(models.Model):
-    # position_id is implicitly created as 'id'
     name = models.CharField(max_length=255)
-    level = models.SmallIntegerField(
-        help_text="Чем меньше — тем выше"
-    )  # Level 1 is highest
+    level = models.SmallIntegerField(help_text="Чем меньше — тем выше")
 
     def __str__(self):
         return f"{self.name} (Level: {self.level})"
@@ -46,7 +67,6 @@ class Position(models.Model):
 
 
 class Employee(models.Model):
-    # employee_id is implicitly created as 'id'
     user = models.OneToOneField(
         User,
         null=True,
@@ -62,22 +82,37 @@ class Employee(models.Model):
     division = models.ForeignKey(
         Division, on_delete=models.PROTECT, related_name="employees"
     )
-    # hired_date = models.DateField(null=True, blank=True) # Consider adding for staffing calculations
+    # Fields moved from EmployeeStatusLog as per specification
+    acting_for_position = models.ForeignKey(
+        Position,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='acting_employees',
+        help_text="Position this employee is acting for (должность за счёт)"
+    )
+    hired_date = models.DateField(null=True, blank=True)
+    is_active = models.BooleanField(default=True)
+    fired_date = models.DateField(null=True, blank=True)
+
+    def get_current_status(self, date=None):
+        """
+        Calculates the employee's status for a given date based on the status logs.
+        """
+        if date is None:
+            date = timezone.now().date()
+
+        # Find the most recent status log that is active on the given date
+        status_log = self.status_logs.filter(
+            date_from__lte=date
+        ).filter(
+            models.Q(date_to__gte=date) | models.Q(date_to__isnull=True)
+        ).order_by('-date_from', '-id').first()
+
+        return status_log.status if status_log else EmployeeStatusType.ON_DUTY_SCHEDULED
 
     def __str__(self):
         return self.full_name
-
-
-class EmployeeStatusType(models.TextChoices):
-    ON_DUTY_SCHEDULED = "IN_LINEUP", _("В строю")  # Default
-    ON_DUTY_ACTUAL = "ON_DUTY", _("На дежурстве")
-    AFTER_DUTY = "AFTER_DUTY", _("После дежурства")
-    BUSINESS_TRIP = "BUSINESS_TRIP", _("В командировке")
-    TRAINING_ETC = "TRAINING_ETC", _("Учёба / Соревнования / Конференция")
-    ON_LEAVE = "ON_LEAVE", _("В отпуске")
-    SICK_LEAVE = "SICK_LEAVE", _("На больничном")
-    SECONDED_OUT = "SECONDED_OUT", _("Откомандирован")  # Employee is sent out
-    SECONDED_IN = "SECONDED_IN", _("Прикомандирован")  # Employee is received
 
 
 class EmployeeStatusLog(models.Model):
@@ -90,7 +125,7 @@ class EmployeeStatusLog(models.Model):
         default=EmployeeStatusType.ON_DUTY_SCHEDULED,
     )
     date_from = models.DateField()
-    date_to = models.DateField(null=True, blank=True)  # Can be ongoing
+    date_to = models.DateField(null=True, blank=True)
     comment = models.TextField(null=True, blank=True)
     secondment_division = models.ForeignKey(
         Division,
@@ -107,30 +142,7 @@ class EmployeeStatusLog(models.Model):
         on_delete=models.SET_NULL,
         related_name="created_status_logs",
     )
-    acting_for_position = models.ForeignKey(
-        Position,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='acting_employees',
-        help_text="Position this employee is acting for"
-    )
-    hired_date = models.DateField(null=True, blank=True)
-    is_active = models.BooleanField(default=True)
-    fired_date = models.DateField(null=True, blank=True)
-
-    # Добавить метод для получения текущего статуса
-    def get_current_status(self, date=None):
-        if date is None:
-            date = timezone.now().date()
-
-        status_log = self.status_logs.filter(
-            date_from__lte=date
-        ).filter(
-            models.Q(date_to__gte=date) | models.Q(date_to__isnull=True)
-        ).order_by('-date_from').first()
-
-        return status_log.status if status_log else EmployeeStatusType.ON_DUTY_SCHEDULED
+    is_auto_copied = models.BooleanField(default=False, help_text="True if this status was automatically copied from the previous day.")
 
     def __str__(self):
         return f"{self.employee.full_name} - {self.get_status_display()} ({self.date_from} to {self.date_to or 'current'})"
@@ -139,23 +151,9 @@ class EmployeeStatusLog(models.Model):
         ordering = ["-date_from", "-id"]
 
 
-# User Profile to store role and division for JWT/Permissions
-class UserRole(models.IntegerChoices):
-    ROLE_1 = 1, _("Просмотр всей организации (без редактирования)")
-    ROLE_2 = 2, _("Просмотр своего департамента (без редактирования)")
-    ROLE_3 = 3, _("Редактирование своего управления")
-    ROLE_4 = 4, _("Полный доступ (администратор)")
-    ROLE_5 = 5, _("Кадровый администратор подразделения")
-    ROLE_6 = 6, _("Редактирование своего отдела")
-
-
 class UserProfile(models.Model):
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name="profile")
     role = models.IntegerField(choices=UserRole.choices)
-    # division_fk is relevant for roles 2 and 3 to scope their access
-    # For Role 3 (Управление), this should point to their Управление.
-    # For Role 2 (Департамент), this should point to their Департамент.
-    # For Role 1 & 4, this can be null.
     division_assignment = models.ForeignKey(
         Division,
         null=True,
@@ -163,6 +161,7 @@ class UserProfile(models.Model):
         on_delete=models.SET_NULL,
         help_text="Assigned division for role-based access",
     )
+    # Fields for Role-5 as per specification
     include_child_divisions = models.BooleanField(
         default=True,
         help_text="For Role-5: whether access includes child divisions"
@@ -179,37 +178,37 @@ class UserProfile(models.Model):
         return f"{self.user.username} - Role: {self.get_role_display()}"
 
 
-# Добавить в hr_system/personnel/models.py
+# --- Staffing and Vacancy Models ---
 
-from django.utils import timezone
-import json
-
-
-# Штатное расписание
 class StaffingUnit(models.Model):
+    """Штатное расписание"""
     division = models.ForeignKey(Division, on_delete=models.CASCADE, related_name='staffing_units')
     position = models.ForeignKey(Position, on_delete=models.PROTECT)
-    quantity = models.PositiveIntegerField(default=1)
+    quantity = models.PositiveIntegerField(default=1, help_text="Количество по штату")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         unique_together = ['division', 'position']
+        verbose_name = "Staffing Unit"
+        verbose_name_plural = "Staffing Units"
 
     def __str__(self):
         return f"{self.division.name} - {self.position.name} ({self.quantity} units)"
 
     @property
     def occupied_count(self):
+        """Calculates how many positions are filled."""
         return self.division.employees.filter(position=self.position, is_active=True).count()
 
     @property
     def vacant_count(self):
+        """Calculates how many positions are vacant."""
         return max(0, self.quantity - self.occupied_count)
 
 
-# Вакансии
 class Vacancy(models.Model):
+    """Вакансии"""
     staffing_unit = models.ForeignKey(StaffingUnit, on_delete=models.CASCADE, related_name='vacancies')
     title = models.CharField(max_length=255)
     description = models.TextField(blank=True)
@@ -226,8 +225,27 @@ class Vacancy(models.Model):
         return f"{self.title} - {self.staffing_unit.division.name}"
 
 
-# Журнал аудита
+# --- Operations and Logging Models ---
+
+class DivisionStatusUpdate(models.Model):
+    """Индикаторы обновления статусов"""
+    division = models.ForeignKey(Division, on_delete=models.CASCADE, related_name='status_updates')
+    update_date = models.DateField()
+    is_updated = models.BooleanField(default=False)
+    updated_at = models.DateTimeField(null=True, blank=True)
+    updated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
+
+    class Meta:
+        unique_together = ['division', 'update_date']
+        ordering = ['-update_date', 'division__name']
+
+    def __str__(self):
+        status = "Updated" if self.is_updated else "Not Updated"
+        return f"{self.division.name} on {self.update_date}: {status}"
+
+
 class AuditLog(models.Model):
+    """Журнал аудита"""
     OPERATION_CHOICES = [
         ('CREATE', 'Create'),
         ('UPDATE', 'Update'),
@@ -241,12 +259,12 @@ class AuditLog(models.Model):
         ('UNAUTHORIZED_ACCESS', 'Unauthorized Access'),
     ]
 
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     operation = models.CharField(max_length=30, choices=OPERATION_CHOICES)
-    model_name = models.CharField(max_length=50, blank=True)
-    object_id = models.IntegerField(null=True, blank=True)
-    timestamp = models.DateTimeField(auto_now_add=True)
-    details = models.JSONField(default=dict)  # Stores old/new values
+    model_name = models.CharField(max_length=50, blank=True, null=True)
+    object_id = models.PositiveIntegerField(null=True, blank=True)
+    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
+    details = models.JSONField(default=dict, blank=True)
     ip_address = models.GenericIPAddressField(null=True, blank=True)
     user_agent = models.TextField(blank=True)
     session_id = models.CharField(max_length=255, blank=True)
@@ -254,25 +272,22 @@ class AuditLog(models.Model):
     class Meta:
         ordering = ['-timestamp']
         indexes = [
-            models.Index(fields=['-timestamp', 'user']),
-            models.Index(fields=['operation', '-timestamp']),
+            models.Index(fields=['timestamp', 'user']),
+            models.Index(fields=['operation']),
         ]
 
     def __str__(self):
-        return f"{self.user} - {self.operation} - {self.timestamp}"
+        return f"Op: {self.operation} by {self.user} at {self.timestamp}"
 
 
-# Сохраненные документы расхода
 class PersonnelReport(models.Model):
+    """Сохраненные документы расхода"""
     division = models.ForeignKey(Division, on_delete=models.CASCADE)
     report_date = models.DateField()
-    file_path = models.FileField(upload_to='personnel_reports/%Y/%m/%d/')
+    file = models.FileField(upload_to='personnel_reports/%Y/%m/%d/')
     created_at = models.DateTimeField(auto_now_add=True)
     created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True)
-    report_type = models.CharField(max_length=20, choices=[
-        ('DAILY', 'Daily'),
-        ('PERIOD', 'Period'),
-    ], default='DAILY')
+    report_type = models.CharField(max_length=20, choices=[('DAILY', 'Daily'), ('PERIOD', 'Period')], default='DAILY')
     date_from = models.DateField()
     date_to = models.DateField(null=True, blank=True)
 
@@ -280,11 +295,11 @@ class PersonnelReport(models.Model):
         ordering = ['-report_date', '-created_at']
 
     def __str__(self):
-        return f"Report for {self.division.name} - {self.report_date}"
+        return f"Report for {self.division.name} on {self.report_date}"
 
 
-# Уведомления
 class Notification(models.Model):
+    """Уведомления"""
     NOTIFICATION_TYPES = [
         ('SECONDMENT', 'Secondment'),
         ('STATUS_UPDATE', 'Status Update'),
@@ -298,9 +313,9 @@ class Notification(models.Model):
     notification_type = models.CharField(max_length=20, choices=NOTIFICATION_TYPES)
     title = models.CharField(max_length=255)
     message = models.TextField()
-    related_object_id = models.IntegerField(null=True, blank=True)
-    related_model = models.CharField(max_length=50, blank=True)
-    is_read = models.BooleanField(default=False)
+    related_object_id = models.PositiveIntegerField(null=True, blank=True)
+    related_model = models.CharField(max_length=50, blank=True, null=True)
+    is_read = models.BooleanField(default=False, db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     read_at = models.DateTimeField(null=True, blank=True)
 
@@ -311,11 +326,11 @@ class Notification(models.Model):
         if not self.is_read:
             self.is_read = True
             self.read_at = timezone.now()
-            self.save()
+            self.save(update_fields=['is_read', 'read_at'])
 
 
-# Запросы на прикомандирование
 class SecondmentRequest(models.Model):
+    """Запросы на прикомандирование"""
     STATUS_CHOICES = [
         ('PENDING', 'Pending'),
         ('APPROVED', 'Approved'),
@@ -338,19 +353,3 @@ class SecondmentRequest(models.Model):
 
     def __str__(self):
         return f"{self.employee.full_name}: {self.from_division.name} → {self.to_division.name}"
-
-
-# Индикаторы обновления статусов
-class DivisionStatusUpdate(models.Model):
-    division = models.ForeignKey(Division, on_delete=models.CASCADE, related_name='status_updates')
-    update_date = models.DateField()
-    is_updated = models.BooleanField(default=False)
-    updated_at = models.DateTimeField(null=True, blank=True)
-    updated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
-
-    class Meta:
-        unique_together = ['division', 'update_date']
-
-    def __str__(self):
-        status = "✓" if self.is_updated else "✗"
-        return f"{self.division.name} - {self.update_date} - {status}"
