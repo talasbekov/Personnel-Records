@@ -125,3 +125,49 @@ class ReportGenerationTest(APITestCase):
         headers = [cell.text for cell in table.rows[0].cells]
         self.assertIn("Количество по списку", headers)
         self.assertIn("В строю", headers)
+
+        # Check for the new structure in a status cell
+        # The 7th column (index 6) is the first status column 'На дежурстве'
+        status_cell = table.rows[1].cells[6]
+        self.assertIn("0\nПодстрока 1\nПодстрока 2\nПодстрока 3\nПодстрока 4", status_cell.text)
+
+    def test_periodic_report_endpoint(self):
+        """
+        Tests that the /periodic-report endpoint returns a valid .docx file
+        with one page per day in the date range.
+        """
+        date_from = '2025-01-10'
+        date_to = '2025-01-12' # 3 days
+        url = f'/api/personnel/divisions/{self.dep.id}/periodic-report/?date_from={date_from}&date_to={date_to}'
+
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, 200)
+
+        # Verify the document content
+        doc_buffer = io.BytesIO(response.content)
+        document = Document(doc_buffer)
+
+        # Check for the titles of each page
+        titles = [p.text for p in document.paragraphs if 'САПТЫҚ ТІЗІМІ' in p.text]
+        self.assertEqual(len(titles), 3)
+        self.assertIn('10.01.2025', titles[0])
+        self.assertIn('11.01.2025', titles[1])
+        self.assertIn('12.01.2025', titles[2])
+
+    def test_report_endpoint_returns_xlsx_file(self):
+        """
+        Tests that the /report endpoint can return an .xlsx file.
+        """
+        url = f'/api/personnel/divisions/{self.dep.id}/report/'
+        response = self.client.get(url, {'format': 'xlsx'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    def test_report_endpoint_returns_pdf_file(self):
+        """
+        Tests that the /report endpoint can return a .pdf file.
+        """
+        url = f'/api/personnel/divisions/{self.dep.id}/report/'
+        response = self.client.get(url, {'format': 'pdf'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')

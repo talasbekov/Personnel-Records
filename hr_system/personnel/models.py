@@ -43,15 +43,6 @@ class SecondmentStatus(models.TextChoices):
     CANCELLED = "CANCELLED", _("Cancelled")
 
 
-class NotificationType(models.TextChoices):
-    SECONDMENT = "SECONDMENT", _("Secondment")
-    STATUS_UPDATE = "STATUS_UPDATE", _("Status Update")
-    RETURN_REQUEST = "RETURN_REQUEST", _("Return Request")
-    VACANCY_CREATED = "VACANCY_CREATED", _("Vacancy Created")
-    TRANSFER = "TRANSFER", _("Transfer")
-    ESCALATION = "ESCALATION", _("Escalation")
-
-
 # --- Core Models ---
 
 
@@ -310,44 +301,6 @@ class DivisionStatusUpdate(models.Model):
         return f"{self.division.name} on {self.update_date}: {status_label}"
 
 
-class AuditLog(models.Model):
-    """Журнал аудита"""
-    OPERATION_CHOICES = [
-        ("CREATE", "Create"),
-        ("UPDATE", "Update"),
-        ("DELETE", "Delete"),
-        ("STATUS_CHANGE", "Status Change"),
-        ("TRANSFER", "Transfer"),
-        ("SECONDMENT", "Secondment"),
-        ("LOGIN", "Login"),
-        ("LOGOUT", "Logout"),
-        ("REPORT_GENERATED", "Report Generated"),
-        ("UNAUTHORIZED_ACCESS", "Unauthorized Access"),
-    ]
-
-    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
-    operation = models.CharField(max_length=30, choices=OPERATION_CHOICES)
-    model_name = models.CharField(max_length=50, blank=True, null=True)
-    object_id = models.PositiveIntegerField(null=True, blank=True)
-    timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
-    details = models.JSONField(default=dict, blank=True)
-    ip_address = models.GenericIPAddressField(null=True, blank=True)
-    user_agent = models.TextField(blank=True)
-    session_id = models.CharField(max_length=255, blank=True)
-
-    class Meta:
-        ordering = ["-timestamp"]
-        indexes = [
-            models.Index(fields=["timestamp", "user"]),
-            models.Index(fields=["operation"]),
-        ]
-        verbose_name = "Audit Log"
-        verbose_name_plural = "Audit Logs"
-
-    def __str__(self):
-        return f"Op: {self.operation} by {self.user} at {self.timestamp}"
-
-
 class PersonnelReport(models.Model):
     """Сохраненные документы расхода"""
     division = models.ForeignKey(Division, on_delete=models.CASCADE)
@@ -368,30 +321,6 @@ class PersonnelReport(models.Model):
 
     def __str__(self):
         return f"Report for {self.division.name} on {self.report_date}"
-
-
-class Notification(models.Model):
-    """Уведомления"""
-    recipient = models.ForeignKey(User, on_delete=models.CASCADE, related_name="notifications")
-    notification_type = models.CharField(max_length=20, choices=NotificationType.choices)
-    title = models.CharField(max_length=255)
-    message = models.TextField()
-    related_object_id = models.PositiveIntegerField(null=True, blank=True)
-    related_model = models.CharField(max_length=50, blank=True, null=True)
-    is_read = models.BooleanField(default=False, db_index=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    read_at = models.DateTimeField(null=True, blank=True)
-
-    class Meta:
-        ordering = ["-created_at"]
-        verbose_name = "Notification"
-        verbose_name_plural = "Notifications"
-
-    def mark_as_read(self):
-        if not self.is_read:
-            self.is_read = True
-            self.read_at = timezone.now()
-            self.save(update_fields=["is_read", "read_at"])
 
 
 class SecondmentRequest(models.Model):
