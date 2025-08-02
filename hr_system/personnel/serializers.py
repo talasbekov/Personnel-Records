@@ -9,7 +9,9 @@ from .models import (
     DivisionType,
     UserRole,
     EmployeeStatusType,
+    SecondmentRequest,
 )
+from django.db.models import Q
 from rest_framework_simplejwt.serializers import (
     TokenObtainPairSerializer,
 )  # Added by subtask
@@ -47,6 +49,29 @@ class DivisionSerializer(serializers.ModelSerializer):
 
         serializer = self.__class__(children_queryset, many=True, context=self.context)
         return serializer.data
+
+    def validate(self, data):
+        """
+        Check for cyclical dependencies.
+        """
+        instance = self.instance
+        parent = data.get('parent_division')
+
+        if not parent:
+            return data # No parent, no cycle
+
+        # On create, instance is None. On update, it's the object being updated.
+        if instance and parent == instance:
+            raise serializers.ValidationError("A division cannot be its own parent.")
+
+        # Traverse up from the parent to see if we hit the instance
+        current = parent
+        while current:
+            if instance and current == instance:
+                raise serializers.ValidationError("A division cannot have one of its children as its parent.")
+            current = current.parent_division
+
+        return data
 
 
 class PositionSerializer(serializers.ModelSerializer):
@@ -156,6 +181,50 @@ class EmployeeStatusLogSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ("created_at", "created_by")
 
+    def validate(self, data):
+        """
+        Check for conflicting, overlapping statuses.
+        """
+        employee = data.get('employee')
+        new_status = data.get('status')
+        date_from = data.get('date_from')
+        date_to = data.get('date_to')
+
+        if not all([employee, new_status, date_from]):
+            # Not enough data to validate, other validators will catch this.
+            return data
+
+        # Define statuses that can coexist with others.
+        COEXISTING_STATUSES = {EmployeeStatusType.SECONDED_OUT, EmployeeStatusType.SECONDED_IN}
+
+        # If the new status can coexist, no need to check for conflicts.
+        if new_status in COEXISTING_STATUSES:
+            return data
+
+        # Find existing statuses that overlap with the new date range.
+        # An overlap occurs if (StartA <= EndB) and (EndA >= StartB)
+        overlapping_statuses = EmployeeStatusLog.objects.filter(
+            employee=employee,
+            # Exclude statuses that can coexist.
+            status__in=[s for s in EmployeeStatusType if s not in COEXISTING_STATUSES],
+            date_from__lte=date_to if date_to else date_from,
+        ).filter(
+            Q(date_to__gte=date_from) | Q(date_to__isnull=True)
+        )
+
+        # If we are updating an existing instance, we should exclude it from the check.
+        if self.instance:
+            overlapping_statuses = overlapping_statuses.exclude(pk=self.instance.pk)
+
+        if overlapping_statuses.exists():
+            conflict = overlapping_statuses.first()
+            raise serializers.ValidationError(
+                f"The proposed status conflicts with an existing status ('{conflict.get_status_display()}') "
+                f"from {conflict.date_from} to {conflict.date_to or 'ongoing'}."
+            )
+
+        return data
+
     def create(self, validated_data):
         validated_data["created_by"] = self.context["request"].user
         return super().create(validated_data)
@@ -170,6 +239,17 @@ class StatusUpdateItemSerializer(serializers.Serializer):
 
 
 # Custom Token Serializer for JWT claims (appended by subtask)
+class EmployeeTransferSerializer(serializers.Serializer):
+    new_division_id = serializers.IntegerField()
+
+    def validate_new_division_id(self, value):
+        try:
+            Division.objects.get(id=value)
+        except Division.DoesNotExist:
+            raise serializers.ValidationError("Division with this ID does not exist.")
+        return value
+
+
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
     def get_token(cls, user):
@@ -195,3 +275,35 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
             token["role"] = None
             token["division_id"] = None
         return token
+
+
+class SecondmentRequestSerializer(serializers.ModelSerializer):
+    employee_id = serializers.PrimaryKeyRelatedField(
+        queryset=Employee.objects.all(), source='employee'
+    )
+    to_division_id = serializers.PrimaryKeyRelatedField(
+        queryset=Division.objects.all(), source='to_division'
+    )
+
+    employee = EmployeeSerializer(read_only=True)
+    from_division = DivisionSerializer(read_only=True)
+    to_division = DivisionSerializer(read_only=True)
+    requested_by = UserSerializer(read_only=True)
+    approved_by = UserSerializer(read_only=True)
+
+    class Meta:
+        model = SecondmentRequest
+        fields = [
+            'id', 'employee', 'employee_id', 'from_division', 'to_division', 'to_division_id',
+            'status', 'date_from', 'date_to', 'reason', 'requested_by', 'approved_by',
+            'created_at', 'updated_at'
+        ]
+        read_only_fields = [
+            'status', 'from_division', 'requested_by', 'approved_by', 'created_at', 'updated_at'
+        ]
+
+    def create(self, validated_data):
+        employee = validated_data['employee']
+        validated_data['from_division'] = employee.division
+        validated_data['requested_by'] = self.context['request'].user
+        return super().create(validated_data)
