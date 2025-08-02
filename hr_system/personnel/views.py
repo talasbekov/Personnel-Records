@@ -169,6 +169,35 @@ class DivisionViewSet(viewsets.ModelViewSet):
         response["Content-Disposition"] = f'attachment; filename="expense_report_{division.name}_{report_date}.docx"'
         return response
 
+    @action(detail=True, methods=["get"], url_path="periodic-report")
+    def periodic_report(self, request, pk=None):
+        """
+        Generates and returns a .docx expense report for a date range.
+        """
+        division = self.get_object()
+        date_from_str = request.query_params.get('date_from')
+        date_to_str = request.query_params.get('date_to')
+
+        if not date_from_str or not date_to_str:
+            return Response({"error": "Please provide 'date_from' and 'date_to' query parameters."}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            date_from = datetime.date.fromisoformat(date_from_str)
+            date_to = datetime.date.fromisoformat(date_to_str)
+        except ValueError:
+            return Response({"error": "Invalid date format. Please use YYYY-MM-DD."}, status=status.HTTP_400_BAD_REQUEST)
+
+        from .services import generate_periodic_report_docx
+
+        doc_buffer = generate_periodic_report_docx(division, date_from, date_to)
+
+        response = HttpResponse(
+            doc_buffer.read(),
+            content_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
+        response["Content-Disposition"] = f'attachment; filename="periodic_report_{division.name}_{date_from_str}_to_{date_to_str}.docx"'
+        return response
+
     @action(detail=False, methods=["get"], url_path="status-summary")
     def status_summary(self, request):
         summary_date_str = request.query_params.get("date", datetime.date.today().isoformat())
