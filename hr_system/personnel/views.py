@@ -34,7 +34,7 @@ from django.http import HttpResponse
 
 def _gather_descendant_ids(root_division):
     """
-    BFS для сбора всех потомков. Можно заменить на рекурсивный CTE / tree lib для масштабов.
+    BFS to collect all descendant division IDs. Replace with recursive CTE or tree lib for scale.
     """
     descendant_ids = [root_division.id]
     queue = [root_division]
@@ -151,6 +151,9 @@ class DivisionViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=["get"], url_path="report")
     def report(self, request, pk=None):
+        """
+        Generates and returns the .docx expense report for this division.
+        """
         division = self.get_object()
         report_date = datetime.date.today()
 
@@ -253,6 +256,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         base_queryset = Employee.objects.select_related("position", "division").order_by(
             "position__level", "full_name"
         )
+
         profile = user.profile
 
         if profile.role in [UserRole.ROLE_1, UserRole.ROLE_4]:
