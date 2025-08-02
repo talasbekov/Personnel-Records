@@ -153,3 +153,21 @@ class ReportGenerationTest(APITestCase):
         self.assertIn('10.01.2025', titles[0])
         self.assertIn('11.01.2025', titles[1])
         self.assertIn('12.01.2025', titles[2])
+
+    def test_report_endpoint_returns_xlsx_file(self):
+        """
+        Tests that the /report endpoint can return an .xlsx file.
+        """
+        url = f'/api/personnel/divisions/{self.dep.id}/report/'
+        response = self.client.get(url, {'format': 'xlsx'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    def test_report_endpoint_returns_pdf_file(self):
+        """
+        Tests that the /report endpoint can return a .pdf file.
+        """
+        url = f'/api/personnel/divisions/{self.dep.id}/report/'
+        response = self.client.get(url, {'format': 'pdf'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response['Content-Type'], 'application/pdf')
