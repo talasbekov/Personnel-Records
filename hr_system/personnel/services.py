@@ -219,9 +219,10 @@ def generate_expense_report_docx(division_stats: dict):
         # Implementing that requires a more complex table structure.
         # For now, we just put the count.
         cell_content = f"{count}\n"
-        details = division_stats.get('status_details', {}).get(status, [])
-        if details:
-            cell_content += "\n".join([d['full_name'] for d in details])
+        cell_content += "Подстрока 1\n"
+        cell_content += "Подстрока 2\n"
+        cell_content += "Подстрока 3\n"
+        cell_content += "Подстрока 4"
 
         data_row.append(cell_content)
 
