@@ -3,6 +3,7 @@ from django.contrib.auth.models import User
 from django.contrib.contenttypes.fields import GenericForeignKey
 from django.contrib.contenttypes.models import ContentType
 
+
 class AuditLog(models.Model):
     """Журнал аудита"""
     ACTION_CHOICES = [
@@ -21,10 +22,10 @@ class AuditLog(models.Model):
     user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     action_type = models.CharField(max_length=30, choices=ACTION_CHOICES)
 
-    # GenericForeignKey to the target object
+    # Generic relation to the target object
     content_type = models.ForeignKey(ContentType, on_delete=models.CASCADE, null=True, blank=True)
     object_id = models.PositiveIntegerField(null=True, blank=True)
-    target_object = GenericForeignKey('content_type', 'object_id')
+    target_object = GenericForeignKey("content_type", "object_id")
 
     payload = models.JSONField(default=dict, blank=True)
     timestamp = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -37,6 +38,7 @@ class AuditLog(models.Model):
         indexes = [
             models.Index(fields=["timestamp", "user"]),
             models.Index(fields=["action_type"]),
+            models.Index(fields=["content_type", "object_id"]),
         ]
         verbose_name = "Audit Log"
         verbose_name_plural = "Audit Logs"
