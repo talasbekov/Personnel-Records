@@ -91,3 +91,38 @@ class RoleRateThrottle(SimpleRateThrottle):
         # Look up the rate for the current role; fall back to a default
         self.rate = default_rates.get(role, "60/min")
         return super().allow_request(request, view)
+
+
+class AuthRateThrottle(SimpleRateThrottle):
+    """Throttle for authentication attempts.
+
+    Limits login or token‑related endpoints to 5 requests per minute to
+    mitigate brute‑force attacks.  Use this throttle on views handling
+    authentication or password reset.
+    """
+
+    scope = "auth"
+    rate = "5/min"
+
+
+class ReportGenerationThrottle(SimpleRateThrottle):
+    """Throttle for report/document generation endpoints.
+
+    Constrains document generation to 10 requests per hour per user to
+    prevent resource exhaustion when exporting large reports.
+    """
+
+    scope = "report"
+    rate = "10/hour"
+
+
+class SearchRateThrottle(SimpleRateThrottle):
+    """Throttle for search endpoints.
+
+    Allows up to 200 search queries per minute per user.  Apply this
+    throttle to views that perform search or filter operations on
+    large datasets to avoid performance degradation.
+    """
+
+    scope = "search"
+    rate = "200/min"

@@ -153,14 +153,19 @@ class IsRole5(BaseRolePermission):
                 target_division = obj.from_division
         if not target_division:
             return False
-        # Ensure target division is within the assigned subtree
-        current = target_division
+        # Determine whether child divisions are included in the scope
+        include_children = getattr(profile, "include_child_divisions", False)
         within_scope = False
-        while current:
-            if current == assigned_division:
-                within_scope = True
-                break
-            current = current.parent_division
+        if include_children:
+            # Target must be in the subtree rooted at assigned_division
+            current = target_division
+            while current:
+                if current == assigned_division:
+                    within_scope = True
+                    break
+                current = current.parent_division
+        else:
+            within_scope = (target_division == assigned_division)
         if not within_scope:
             return False
         # Enforce division type assignment if specified
