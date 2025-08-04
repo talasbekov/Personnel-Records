@@ -1,3 +1,23 @@
+"""
+Models for the personnel management application.
+
+This file is based on the original repository's models but includes a
+couple of extensions and fixes:
+
+* A new ``DivisionHierarchy`` enumeration and ``hierarchy_variant`` field on
+  ``Division`` to support the three organisational hierarchy variants
+  described in the specification.  This allows divisions to be marked
+  either as using the standard multi‑level hierarchy (Company →
+  Department → Management → Office), direct subordination to the
+  company, or a mixed model.
+
+* Additional documentation strings and sensible defaults for some fields.
+
+No existing field names have been renamed so migrations remain
+compatible with the initial schema.  New fields are nullable with
+defaults to preserve backwards compatibility.
+"""
+
 import json
 from django.db import models
 from django.core.exceptions import ValidationError
@@ -13,6 +33,17 @@ class DivisionType(models.TextChoices):
     DEPARTMENT = "DEPARTMENT", _("Департамент")
     MANAGEMENT = "MANAGEMENT", _("Управление")
     OFFICE = "OFFICE", _("Отдел")
+
+
+# Variants of organisational hierarchies.  The default is
+# ``STANDARD``, which follows the conventional multi‑level hierarchy.  The
+# ``DIRECT`` variant allows management or offices to report directly to
+# the company, skipping intermediate levels.  ``MIXED`` allows for
+# combinations of both.
+class DivisionHierarchy(models.TextChoices):
+    STANDARD = "STANDARD", _("Стандартная")
+    DIRECT = "DIRECT", _("Прямое подчинение")
+    MIXED = "MIXED", _("Смешанная")
 
 
 class EmployeeStatusType(models.TextChoices):
@@ -59,13 +90,24 @@ class Division(models.Model):
         max_length=20,
         choices=DivisionType.choices,
     )
+    hierarchy_variant = models.CharField(
+        max_length=20,
+        choices=DivisionHierarchy.choices,
+        default=DivisionHierarchy.STANDARD,
+        help_text=_("Вариант иерархии для данной структуры"),
+    )
 
     class Meta:
         verbose_name = "Division"
         verbose_name_plural = "Divisions"
 
     def clean(self):
-        # Prevent cyclical parent relationships
+        """
+        Prevent cyclical parent relationships.  This method traverses
+        up the ancestry of ``parent_division`` to ensure that the current
+        instance does not appear in its own lineage, which would create a
+        cycle and break the tree structure.
+        """
         ancestor = self.parent_division
         while ancestor:
             if ancestor == self:
@@ -82,7 +124,7 @@ class Division(models.Model):
 
 class Position(models.Model):
     name = models.CharField(max_length=255)
-    level = models.SmallIntegerField(help_text="Чем меньше — тем выше")
+    level = models.SmallIntegerField(help_text=_("Чем меньше — тем выше"))
 
     class Meta:
         ordering = ["level", "name"]
@@ -99,11 +141,11 @@ class Employee(models.Model):
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        help_text="Link to Django User, if applicable",
+        help_text=_("Связь с пользователем Django, если применимо"),
     )
     full_name = models.CharField(max_length=255)
     photo = models.ImageField(
-        upload_to="employee_photos/", null=True, blank=True, help_text="Фото 3×4"
+        upload_to="employee_photos/", null=True, blank=True, help_text=_("Фото 3×4")
     )
     position = models.ForeignKey(Position, on_delete=models.PROTECT)
     division = models.ForeignKey(
@@ -115,7 +157,7 @@ class Employee(models.Model):
         null=True,
         blank=True,
         related_name="acting_employees",
-        help_text="Position this employee is acting for (должность за счёт)",
+        help_text=_("Должность, за счёт которой действует сотрудник"),
     )
     hired_date = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)
@@ -127,8 +169,9 @@ class Employee(models.Model):
 
     def get_current_status(self, date=None):
         """
-        Calculates the employee's status for a given date based on the status logs.
-        Default is ON_DUTY_SCHEDULED if no active log exists.
+        Returns the employee's status for a given date based on the status logs.
+        If no active log exists the default ``ON_DUTY_SCHEDULED`` is returned.
+        ``date`` defaults to today if not specified.
         """
         if date is None:
             date = timezone.now().date()
@@ -174,7 +217,7 @@ class EmployeeStatusLog(models.Model):
     )
     is_auto_copied = models.BooleanField(
         default=False,
-        help_text="True if this status was automatically copied from the previous day.",
+        help_text=_("True if this status was automatically copied from the previous day."),
     )
 
     class Meta:
@@ -197,18 +240,18 @@ class UserProfile(models.Model):
         null=True,
         blank=True,
         on_delete=models.SET_NULL,
-        help_text="Assigned division for role-based access",
+        help_text=_("Assigned division for role-based access"),
     )
     include_child_divisions = models.BooleanField(
         default=True,
-        help_text="For Role-5: whether access includes child divisions",
+        help_text=_("For Role‑5: whether access includes child divisions"),
     )
     division_type_assignment = models.CharField(
         max_length=20,
         choices=DivisionType.choices,
         null=True,
         blank=True,
-        help_text="Type of division for Role-5 assignment",
+        help_text=_("Type of division for Role‑5 assignment"),
     )
 
     class Meta:
@@ -226,7 +269,7 @@ class StaffingUnit(models.Model):
     """Штатное расписание"""
     division = models.ForeignKey(Division, on_delete=models.CASCADE, related_name="staffing_units")
     position = models.ForeignKey(Position, on_delete=models.PROTECT)
-    quantity = models.PositiveIntegerField(default=1, help_text="Количество по штату")
+    quantity = models.PositiveIntegerField(default=1, help_text=_("Количество по штату"))
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

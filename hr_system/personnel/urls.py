@@ -1,3 +1,13 @@
+"""
+URL configuration for the personnel API.
+
+Registers all viewsets defined in ``personnel.views`` with a DRF router.
+These endpoints expose CRUD operations for divisions, positions,
+employees, user profiles, secondment requests, status logs, staffing
+units and vacancies.  Additional custom actions are available on some
+viewsets (see viewset definitions for details).
+"""
+
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (

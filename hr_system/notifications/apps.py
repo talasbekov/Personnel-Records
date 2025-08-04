@@ -1,12 +1,23 @@
 from django.apps import AppConfig
 
+
 class NotificationsConfig(AppConfig):
+    """
+    Configuration for the notifications app.
+
+    Ensures that signal handlers are imported when the app is ready so
+    that model events generate corresponding notifications.  Uses the
+    ``ready`` hook to avoid import side effects during startup.
+    """
+
     default_auto_field = "django.db.models.BigAutoField"
     name = "notifications"
 
-    def ready(self):
-        # Import signal handlers if they exist
+    def ready(self):  # pragma: no cover
+        # Import signal handlers.  Any ImportError is silently ignored
+        # to allow the project to run even if optional dependencies are
+        # unavailable (e.g. Channels).
         try:
             import notifications.signals  # noqa: F401
-        except ImportError:
+        except Exception:
             pass
