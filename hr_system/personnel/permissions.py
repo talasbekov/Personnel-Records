@@ -11,6 +11,7 @@ division types are permitted.
 """
 
 from rest_framework.permissions import BasePermission, SAFE_METHODS
+from django.utils import timezone
 from .models import UserRole, Employee, EmployeeStatusType, Division, SecondmentRequest
 
 
@@ -86,12 +87,13 @@ class IsRole3(BaseRolePermission):
             return False
         # Check if the user is seconded out
         try:
-            is_seconded_out = Employee.objects.filter(
-                user=request.user,
-                status_logs__status=EmployeeStatusType.SECONDED_OUT,
-                status_logs__date_to__isnull=True,
-            ).exists()
-            if is_seconded_out:
+            # Determine if the user is currently seconded out by
+            # inspecting their current status log.  It is not enough to
+            # check for any open secondment log, since the log may have
+            # expired.  Use ``get_current_status`` for accuracy.
+            employee = Employee.objects.get(user=request.user)
+            today = timezone.now().date()
+            if employee.get_current_status(date=today) == EmployeeStatusType.SECONDED_OUT:
                 return False
         except Employee.DoesNotExist:
             return False

@@ -46,6 +46,7 @@ from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
+from django.conf import settings
 from rest_framework import permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -82,12 +83,12 @@ from .serializers import (
 from .permissions import IsRole4, IsRole1, IsRole2, IsRole3, IsRole5, IsRole6, IsReadOnly
 from .services import (
     get_division_statistics,
-    generate_expense_report_docx,
     generate_expense_report_xlsx,
     generate_expense_report_pdf,
-    generate_periodic_report_docx,
     generate_periodic_report_xlsx,
     generate_periodic_report_pdf,
+    generate_detailed_report_docx,
+    generate_detailed_periodic_report_docx,
 )
 
 
@@ -113,7 +114,7 @@ class DivisionViewSet(viewsets.ModelViewSet):
     serializer_class = DivisionSerializer
     permission_classes = [IsRole4 | (IsReadOnly & (IsRole1 | IsRole2 | IsRole3 | IsRole5 | IsRole6))]
 
-    @method_decorator(cache_page(60 * 15))
+    @method_decorator(cache_page(settings.CACHE_TIMEOUT))
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
@@ -261,19 +262,22 @@ class DivisionViewSet(viewsets.ModelViewSet):
                 {"error": "Cannot generate report until all divisions have updated their statuses."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        stats = get_division_statistics(division, report_date)
         buffer = None
         content_type = ""
         filename = ""
+        # For DOCX format produce a detailed report in accordance with the specification
         if output_format == "docx":
-            buffer = generate_expense_report_docx(stats)
+            buffer = generate_detailed_report_docx(division, report_date)
             content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             filename = f"expense_report_{division.name}_{report_date}.docx"
         elif output_format == "xlsx":
+            # XLSX reports remain summary style for now
+            stats = get_division_statistics(division, report_date)
             buffer = generate_expense_report_xlsx(stats)
             content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             filename = f"expense_report_{division.name}_{report_date}.xlsx"
         elif output_format == "pdf":
+            stats = get_division_statistics(division, report_date)
             buffer = generate_expense_report_pdf(stats)
             content_type = "application/pdf"
             filename = f"expense_report_{division.name}_{report_date}.pdf"
@@ -347,7 +351,7 @@ class DivisionViewSet(viewsets.ModelViewSet):
         content_type = ""
         filename = ""
         if output_format == "docx":
-            buffer = generate_periodic_report_docx(division, date_from, date_to)
+            buffer = generate_detailed_periodic_report_docx(division, date_from, date_to)
             content_type = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
             filename = f"periodic_report_{division.name}_{date_from_str}_to_{date_to_str}.docx"
         elif output_format == "xlsx":
@@ -440,7 +444,7 @@ class PositionViewSet(viewsets.ModelViewSet):
     queryset = Position.objects.all()
     serializer_class = PositionSerializer
     permission_classes = [IsRole4 | (IsReadOnly & permissions.IsAuthenticated)]
-    @method_decorator(cache_page(60 * 15))
+    @method_decorator(cache_page(settings.CACHE_TIMEOUT))
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
 
@@ -448,7 +452,7 @@ class PositionViewSet(viewsets.ModelViewSet):
 class EmployeeViewSet(viewsets.ModelViewSet):
     serializer_class = EmployeeSerializer
     permission_classes = [IsRole4 | IsRole5 | (IsReadOnly & (IsRole1 | IsRole2 | IsRole3 | IsRole6))]
-    @method_decorator(cache_page(60 * 15))
+    @method_decorator(cache_page(settings.CACHE_TIMEOUT))
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)
     def get_queryset(self):
@@ -572,13 +576,24 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
         instance.status = SecondmentStatus.APPROVED
         instance.approved_by = request.user
         instance.save()
-        # Create a status log indicating the employee is seconded out
+        # Create status logs for the secondment.  Mark the employee as
+        # seconded out of their home division and as seconded in to the
+        # receiving division.  Both logs share the same period.
         EmployeeStatusLog.objects.create(
             employee=instance.employee,
             status=EmployeeStatusType.SECONDED_OUT,
             date_from=instance.date_from,
             date_to=instance.date_to,
             comment=f"Seconded to {instance.to_division.name}",
+            secondment_division=instance.to_division,
+            created_by=request.user,
+        )
+        EmployeeStatusLog.objects.create(
+            employee=instance.employee,
+            status=EmployeeStatusType.SECONDED_IN,
+            date_from=instance.date_from,
+            date_to=instance.date_to,
+            comment=f"From {instance.from_division.name}",
             secondment_division=instance.to_division,
             created_by=request.user,
         )
@@ -597,7 +612,14 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
                 {"error": "Only approved secondments can be returned."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        # Close the secondment status log
+        # Only the receiving division's HR or admin can approve a return
+        profile = getattr(request.user, "profile", None)
+        if profile and profile.role == UserRole.ROLE_5 and profile.division_assignment != instance.to_division:
+            return Response(
+                {"error": "Only the receiving division's HR administrator can approve the return."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        # Close the secondment status logs
         today = datetime.date.today()
         status_log = EmployeeStatusLog.objects.filter(
             employee=instance.employee,
@@ -647,6 +669,6 @@ class StaffingUnitViewSet(viewsets.ModelViewSet):
     queryset = StaffingUnit.objects.all().select_related("division", "position")
     serializer_class = StaffingUnitSerializer
     permission_classes = [IsRole4 | IsRole5]
-    @method_decorator(cache_page(60 * 15))
+    @method_decorator(cache_page(settings.CACHE_TIMEOUT))
     def list(self, request, *args, **kwargs):
         return super().list(request, *args, **kwargs)

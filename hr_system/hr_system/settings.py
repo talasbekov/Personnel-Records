@@ -31,6 +31,7 @@ backends to suit your deployment environment.
 
 from pathlib import Path
 from datetime import timedelta
+import os
 
 # Base directory
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -117,6 +118,21 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 STATIC_URL = "static/"
 
+# Media and file storage configuration.  Use MinIO/S3 compatible
+# storage backend for photos and generated reports.  In production,
+# supply the appropriate environment variables or override these
+# settings in a local settings file.  Bucket names and credentials
+# below are placeholders.
+MEDIA_URL = "/media/"
+DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL", "http://minio:9000")
+AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
+AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
+AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "hr-media")
+AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
+AWS_S3_SIGNATURE_VERSION = "s3v4"
+AWS_DEFAULT_ACL = None
+
 # Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
@@ -171,6 +187,9 @@ CACHES = {
     }
 }
 
+# Default cache timeout (in seconds) used by cache_page decorators.
+CACHE_TIMEOUT = 60 * 5  # five minutes; adjust as necessary
+
 # Sessions stored in cache for improved performance
 SESSION_ENGINE = "django.contrib.sessions.backends.cached_db"
 
@@ -200,9 +219,33 @@ CELERY_BEAT_SCHEDULE = {
         "task": "personnel.tasks.copy_statuses_task",
         "schedule": crontab(minute=5, hour=0),
     },
-    # Check for overdue status updates mid‑morning.
-    "check_status_updates_daily": {
+    # Run the check for overdue status updates multiple times per day to
+    # implement automatic escalation reminders.  According to the
+    # specification, escalations should occur at 14:00, 16:00 and 18:00.
+    "check_status_updates_14": {
         "task": "personnel.tasks.check_status_updates_task",
-        "schedule": crontab(minute=0, hour=1),
+        "schedule": crontab(minute=0, hour=14),
+    },
+    "check_status_updates_16": {
+        "task": "personnel.tasks.check_status_updates_task",
+        "schedule": crontab(minute=0, hour=16),
+    },
+    "check_status_updates_18": {
+        "task": "personnel.tasks.check_status_updates_task",
+        "schedule": crontab(minute=0, hour=18),
+    },
+    # Copy statuses after the work day ends (e.g. 18:10) to carry
+    # forward any statuses for the next day.  This helps ensure that
+    # employees who have not had their statuses manually updated retain
+    # their last known status.
+    "copy_statuses_after_18": {
+        "task": "personnel.tasks.copy_statuses_task",
+        "schedule": crontab(minute=10, hour=18),
+    },
+    # Reset employees to the default status if their previous status
+    # period has expired.  Runs shortly after midnight every day.
+    "reset_default_statuses": {
+        "task": "personnel.tasks.reset_default_statuses_task",
+        "schedule": crontab(minute=10, hour=0),
     },
 }

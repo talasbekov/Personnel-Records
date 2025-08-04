@@ -47,7 +47,16 @@ class DivisionHierarchy(models.TextChoices):
 
 
 class EmployeeStatusType(models.TextChoices):
-    ON_DUTY_SCHEDULED = "IN_LINEUP", _("В строю")
+    """
+    Enumeration of employee statuses.  The internal value of each
+    constant mirrors the name to avoid confusion when persisting logs.
+    The default status is ``ON_DUTY_SCHEDULED`` (in line), which
+    represents employees who are on duty but have not yet commenced
+    their shift.  This status is used automatically when no log
+    exists or when a previous status period has expired.
+    """
+
+    ON_DUTY_SCHEDULED = "ON_DUTY_SCHEDULED", _("В строю")
     ON_DUTY_ACTUAL = "ON_DUTY", _("На дежурстве")
     AFTER_DUTY = "AFTER_DUTY", _("После дежурства")
     BUSINESS_TRIP = "BUSINESS_TRIP", _("В командировке")
@@ -145,7 +154,10 @@ class Employee(models.Model):
     )
     full_name = models.CharField(max_length=255)
     photo = models.ImageField(
-        upload_to="employee_photos/", null=True, blank=True, help_text=_("Фото 3×4")
+        upload_to="employee_photos/%Y/%m/",
+        null=True,
+        blank=True,
+        help_text=_("Фото 3×4 (stored in year/month folders)"),
     )
     position = models.ForeignKey(Position, on_delete=models.PROTECT)
     division = models.ForeignKey(
