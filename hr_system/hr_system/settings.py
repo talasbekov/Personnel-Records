@@ -155,6 +155,7 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
+        "hr_system.personnel.throttles.RoleRateThrottle",
     ],
     # Rate limits are deliberately generous to allow for internal API usage;
     # tune them in production as necessary.
