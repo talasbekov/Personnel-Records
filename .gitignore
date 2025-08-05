@@ -70,7 +70,7 @@ instance/
 
 # Sphinx documentation
 docs/_build/
-
+hr_system/employee_photos/
 # PyBuilder
 .pybuilder/
 target/
