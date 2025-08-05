@@ -20,7 +20,6 @@ from typing import Any, Dict, Iterable
 import datetime
 from django.utils import timezone
 
-from django.db import transaction
 from django.http import HttpResponse
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -42,6 +41,26 @@ from .serializers import (
 )
 from .permissions import IsRole4, IsRole5, IsRole3, IsRole6
 from .throttles import ReportGenerationThrottle
+from rest_framework_simplejwt.views import TokenObtainPairView
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from personnel.models import UserRole  # если не импортировал
+
+
+class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
+    def validate(self, attrs):
+        data = super().validate(attrs)
+        try:
+            role = self.user.profile.role
+            data['role'] = role
+            data['role_display'] = UserRole(role).label
+        except Exception:
+            data['role'] = None
+            data['role_display'] = None
+        return data
+
+
+class MyTokenObtainPairView(TokenObtainPairView):
+    serializer_class = MyTokenObtainPairSerializer
 
 
 class DivisionViewSet(viewsets.ModelViewSet):

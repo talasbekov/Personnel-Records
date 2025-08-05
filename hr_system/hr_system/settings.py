@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "drf_yasg",
     "rest_framework_simplejwt",
     "django_filters",
     "personnel",
@@ -155,14 +156,16 @@ REST_FRAMEWORK = {
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.AnonRateThrottle",
         "rest_framework.throttling.UserRateThrottle",
-        "hr_system.personnel.throttles.RoleRateThrottle",
+        "personnel.throttles.RoleRateThrottle",
     ],
     # Rate limits are deliberately generous to allow for internal API usage;
     # tune them in production as necessary.
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "1000/day",
-        "user": "5000/day",
+        'role': '100/hour',
+        'user': '1000/day',
+        'anon': '50/day',
     },
+
 }
 
 # Simple JWT settings
@@ -177,6 +180,19 @@ SIMPLE_JWT = {
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
 }
+
+SWAGGER_SETTINGS = {
+    "SECURITY_DEFINITIONS": {
+        "Bearer": {
+            "type": "apiKey",
+            "name": "Authorization",
+            "in": "header",
+            "description": "Формат: Bearer {ваш access токен}",
+        }
+    },
+    "USE_SESSION_AUTH": False,
+}
+
 
 # Caching configuration – using local memory cache by default.
 # For production environments consider using Memcached or Redis for better

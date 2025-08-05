@@ -14,6 +14,53 @@ try:
 except Exception:  # pragma: no cover
     Division = None  # type: ignore
 
+from .models import (
+    Position, Employee, UserProfile,
+    SecondmentRequest, EmployeeStatusLog,
+    StaffingUnit, Vacancy
+)
+
+class PositionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Position
+        fields = '__all__'
+
+
+class EmployeeSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Employee
+        fields = '__all__'
+
+
+class UserProfileSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = UserProfile
+        fields = '__all__'
+
+
+class SecondmentRequestSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SecondmentRequest
+        fields = '__all__'
+
+
+class EmployeeStatusLogSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EmployeeStatusLog
+        fields = '__all__'
+
+
+class StaffingUnitSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = StaffingUnit
+        fields = '__all__'
+
+
+class VacancySerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Vacancy
+        fields = '__all__'
+
 
 class DivisionSerializer(serializers.ModelSerializer):
     """Serializer for the Division model.
