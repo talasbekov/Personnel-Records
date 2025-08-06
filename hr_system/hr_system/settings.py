@@ -191,6 +191,7 @@ SWAGGER_SETTINGS = {
         }
     },
     "USE_SESSION_AUTH": False,
+    "DEFAULT_INFO": "hr_system.urls.api_info",
 }
 
 
