@@ -1,13 +1,3 @@
-"""
-Middleware to record audit log entries for API requests.
-
-This middleware intercepts POST/PUT/PATCH/DELETE requests to API
-endpoints and records an ``AuditLog`` entry capturing the action type,
-user, target object and any differences in the object's state. It
-also stores request metadata such as IP address and user agent.
-The middleware must be added to the ``MIDDLEWARE`` list in settings to take effect.
-"""
-
 import json
 from django.contrib.contenttypes.models import ContentType
 from django.forms.models import model_to_dict
@@ -19,7 +9,7 @@ class AuditMiddleware:
         self.get_response = get_response
 
     def __call__(self, request):
-        # Prepare to capture pre‑update state for PUT/PATCH
+        # Prepare to capture pre-update state for PUT/PATCH
         request.audit_pre_update_state = None
         if request.method in ["PUT", "PATCH"]:
             try:
@@ -45,10 +35,10 @@ class AuditMiddleware:
         if not request.path.startswith("/api/") or not (200 <= response.status_code < 300):
             return response
 
-        user = request.user if request.user.is_authenticated else None
+        user = request.user if hasattr(request, 'user') and request.user.is_authenticated else None
         ip_address = request.META.get("REMOTE_ADDR")
         user_agent = request.META.get("HTTP_USER_AGENT", "")
-        session_id = request.session.session_key
+        session_id = getattr(request.session, 'session_key', None)
 
         # Determine action type
         action_map = {
@@ -66,7 +56,8 @@ class AuditMiddleware:
         content_type = None
 
         # For CREATE/UPDATE: extract object id from JSON response
-        if response.content and response.get("Content-Type") == "application/json":
+        content_type_header = response.get("Content-Type", "")
+        if response.content and content_type_header and "application/json" in content_type_header:
             try:
                 response_data = json.loads(response.content)
                 if isinstance(response_data, dict):
@@ -122,7 +113,7 @@ class AuditMiddleware:
             except Exception:
                 pass
 
-        # Create log
+        # Create log entry
         if content_type and target_object_id:
             AuditLog.objects.create(
                 user=user,

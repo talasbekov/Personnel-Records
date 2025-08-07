@@ -67,9 +67,12 @@ class DivisionSerializer(serializers.ModelSerializer):
             'hierarchy_variant', 'hierarchy_variant_display',
             'description', 'contact_info', 'head_position', 'head_position_name',
             'employee_count', 'child_divisions_count',
-            'created_at', 'updated_at'
+            'created_at', 'updated_at',
         ]
         read_only_fields = ['created_at', 'updated_at']
+        extra_kwargs = {
+            'hierarchy_variant': {'required': False},
+        }
 
     def get_employee_count(self, obj):
         return obj.employees.filter(is_active=True).count()
