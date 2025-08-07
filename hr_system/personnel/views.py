@@ -694,12 +694,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         profile = user.profile
         queryset = Employee.objects.select_related(
             'division', 'position', 'user', 'acting_for_position'
-        ).prefetch_related(
-            Prefetch(
-                'status_logs',
-                queryset=EmployeeStatusLog.objects.order_by('-date_from')[:5]
-            )
-        )
+        ).prefetch_related('status_logs')
 
         # Роли 1 и 4 видят всех
         if profile.role in [UserRole.ROLE_1, UserRole.ROLE_4]:

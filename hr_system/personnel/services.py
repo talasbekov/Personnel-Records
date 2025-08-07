@@ -171,20 +171,23 @@ def _collect_division_data(division: Division, date: datetime.date) -> Dict:
 
 
 def _create_report_table_docx(doc: Document, data: List[Dict], report_date: datetime.date):
-    """Создать таблицу отчета в документе Word"""
+    """Создать таблицу отчета в документе Word согласно ТЗ п.12"""
 
-    # Заголовок
+    # Заголовок согласно ТЗ п.12.2
     heading = doc.add_paragraph()
     heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+
+    # Используем первое подразделение для названия
+    division_name = data[0]['division'].name if data else "ОРГАНИЗАЦИЯ"
+
     run = heading.add_run(
-        f"{data[0]['division'].name} ЖЕКЕ ҚҰРАМЫНЫҢ САПТЫҚ ТІЗІМІ "
+        f"{division_name} ЖЕКЕ ҚҰРАМЫНЫҢ САПТЫҚ ТІЗІМІ "
         f"{report_date.strftime('%d.%m.%Y')} ЖЫЛҒЫ"
     )
     run.font.size = Pt(16)
     run.font.bold = True
 
-    # Определяем количество колонок
-    # Базовые колонки + колонки для каждого статуса
+    # Колонки согласно ТЗ п.12.3
     status_columns = [
         ('На дежурстве', EmployeeStatusType.ON_DUTY_ACTUAL),
         ('После дежурства', EmployeeStatusType.AFTER_DUTY),
@@ -196,30 +199,42 @@ def _create_report_table_docx(doc: Document, data: List[Dict], report_date: date
         ('Откомандирован', EmployeeStatusType.SECONDED_OUT),
     ]
 
-    # Создаем таблицу
-    num_cols = 6 + len(status_columns)  # № + Управление + По штату + По списку + Вакант + В строю + статусы
-    table = doc.add_table(rows=1 + len(data) * 5 + 1, cols=num_cols)  # Заголовок + 5 строк на подразделение + Итого
+    # Создаем таблицу с учетом 4 строк данных для каждого статуса
+    num_cols = 6 + len(status_columns)
+    num_rows = 1  # Заголовок
+
+    # Считаем строки: для каждого подразделения нужно 4 строки
+    for div_data in data:
+        num_rows += 4  # 4 строки для каждого управления
+    num_rows += 1  # Итоговая строка
+
+    table = doc.add_table(rows=num_rows, cols=num_cols)
     table.style = 'Table Grid'
     table.alignment = WD_TABLE_ALIGNMENT.CENTER
 
     # Заголовки колонок
     header_cells = table.rows[0].cells
-    header_cells[0].text = '№'
-    header_cells[1].text = 'Название управления'
-    header_cells[2].text = 'Количество по штату'
-    header_cells[3].text = 'Количество по списку'
-    header_cells[4].text = 'Вакантные должности'
-    header_cells[5].text = 'В строю'
+    headers = [
+        '№',
+        'Название управления',
+        'Количество по штату',
+        'Количество по списку',
+        'Вакантные должности',
+        'В строю'
+    ]
+
+    for idx, header in enumerate(headers):
+        header_cells[idx].text = header
+        header_cells[idx].paragraphs[0].runs[0].font.bold = True
+        header_cells[idx].paragraphs[0].runs[0].font.size = Pt(12)
+        header_cells[idx].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     # Заголовки статусов
     for idx, (status_name, _) in enumerate(status_columns):
         header_cells[6 + idx].text = status_name
-
-    # Форматирование заголовков
-    for cell in header_cells:
-        cell.paragraphs[0].runs[0].font.bold = True
-        cell.paragraphs[0].runs[0].font.size = Pt(12)
-        cell.paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
+        header_cells[6 + idx].paragraphs[0].runs[0].font.bold = True
+        header_cells[6 + idx].paragraphs[0].runs[0].font.size = Pt(12)
+        header_cells[6 + idx].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.CENTER
 
     # Данные по подразделениям
     row_idx = 1
@@ -230,12 +245,26 @@ def _create_report_table_docx(doc: Document, data: List[Dict], report_date: date
         stats = div_data['stats']
         status_details = div_data['status_details']
 
-        # Основная строка подразделения
+        # Объединяем ячейки для первых 6 колонок (они охватывают 4 строки)
+        for col_idx in range(6):
+            for merge_row in range(1, 4):
+                if row_idx + merge_row < len(table.rows):
+                    cell_a = table.cell(row_idx, col_idx)
+                    cell_b = table.cell(row_idx + merge_row, col_idx)
+                    cell_a.merge(cell_b)
+
+        # Заполняем основные данные
         cells = table.rows[row_idx].cells
         cells[0].text = str(div_idx)
         cells[1].text = division.name
         cells[2].text = str(stats['total_staffing'])
-        cells[3].text = f"{stats['on_list_count']} +{stats['seconded_in_count']}"
+
+        # Количество по списку с прикомандированными
+        seconded_in = stats['seconded_in_count']
+        cells[3].text = f"{stats['on_list_count']}"
+        if seconded_in > 0:
+            cells[3].text += f" +{seconded_in}"
+
         cells[4].text = str(stats['vacant_count'])
         cells[5].text = str(stats['in_lineup_count'])
 
@@ -246,64 +275,100 @@ def _create_report_table_docx(doc: Document, data: List[Dict], report_date: date
         totals['vacant'] += stats['vacant_count']
         totals['in_lineup'] += stats['in_lineup_count']
 
-        # Данные по статусам
-        for idx, (_, status_type) in enumerate(status_columns):
+        # Данные по статусам (4 строки для каждого)
+        for col_idx, (_, status_type) in enumerate(status_columns):
             details = status_details.get(status_type, {})
-            count = details.get('count', 0)
 
-            # Для прикомандированных берем из другого источника
+            # Специальная обработка для прикомандированных
             if status_type == EmployeeStatusType.SECONDED_IN:
                 count = stats['seconded_in_count']
+                names = [emp['name'] for emp in div_data.get('seconded_employees', [])]
+                comments = [f"Из {emp['from_division']}" for emp in div_data.get('seconded_employees', [])]
+                dates = []
+            else:
+                count = details.get('count', 0)
+                names = details.get('names', [])
+                comments = details.get('comments', [])
+                dates = details.get('dates', [])
 
             totals[f'status_{status_type}'] += count
 
-            # Создаем многострочную ячейку
-            cell = cells[6 + idx]
-            # Строка 1: Количество
-            cell.text = str(count)
-            # Строка 2: Список ФИО
-            if details.get('names'):
-                cell.text += '\n' + ', '.join(details['names'][:3])
-                if len(details['names']) > 3:
-                    cell.text += '...'
-            else:
-                cell.text += '\n-'
-            # Строка 3: Комментарий
-            if details.get('comments'):
-                cell.text += '\n' + '; '.join(details['comments'][:2])
-            else:
-                cell.text += '\n-'
-            # Строка 4: Даты
-            if details.get('dates'):
-                cell.text += '\n' + ', '.join(details['dates'][:3])
-            else:
-                cell.text += '\n-'
+            # Заполняем 4 строки для статуса
+            status_col_idx = 6 + col_idx
 
-            # Форматирование
+            # Строка 1: Количество
+            table.rows[row_idx].cells[status_col_idx].text = str(count)
+
+            # Строка 2: Список ФИО (сокращенно)
+            if row_idx + 1 < len(table.rows):
+                if names:
+                    # Сокращаем имена до инициалов
+                    short_names = []
+                    for name in names[:5]:  # Максимум 5 имен
+                        parts = name.split()
+                        if len(parts) >= 2:
+                            short_name = f"{parts[0]} {parts[1][0]}."
+                            if len(parts) > 2:
+                                short_name += f"{parts[2][0]}."
+                            short_names.append(short_name)
+                        else:
+                            short_names.append(name)
+
+                    table.rows[row_idx + 1].cells[status_col_idx].text = ', '.join(short_names)
+                    if len(names) > 5:
+                        table.rows[row_idx + 1].cells[status_col_idx].text += '...'
+                else:
+                    table.rows[row_idx + 1].cells[status_col_idx].text = '-'
+
+            # Строка 3: Комментарии
+            if row_idx + 2 < len(table.rows):
+                if comments:
+                    comment_text = '; '.join(comments[:2])
+                    if len(comments) > 2:
+                        comment_text += '...'
+                    table.rows[row_idx + 2].cells[status_col_idx].text = comment_text
+                else:
+                    table.rows[row_idx + 2].cells[status_col_idx].text = '-'
+
+            # Строка 4: Даты
+            if row_idx + 3 < len(table.rows):
+                if dates:
+                    date_text = ', '.join(dates[:3])
+                    if len(dates) > 3:
+                        date_text += '...'
+                    table.rows[row_idx + 3].cells[status_col_idx].text = date_text
+                else:
+                    table.rows[row_idx + 3].cells[status_col_idx].text = '-'
+
+            # Форматирование всех 4 строк
+            for i in range(4):
+                if row_idx + i < len(table.rows):
+                    cell = table.rows[row_idx + i].cells[status_col_idx]
+                    for paragraph in cell.paragraphs:
+                        for run in paragraph.runs:
+                            run.font.size = Pt(8)
+
+        row_idx += 4  # Переходим к следующему подразделению
+
+    # Итоговая строка
+    if row_idx < len(table.rows):
+        total_cells = table.rows[row_idx].cells
+        total_cells[0].text = ''
+        total_cells[1].text = 'ОБЩЕЕ'
+        total_cells[2].text = str(totals['staffing'])
+        total_cells[3].text = f"{totals['on_list']} +{totals['seconded_in']}"
+        total_cells[4].text = str(totals['vacant'])
+        total_cells[5].text = str(totals['in_lineup'])
+
+        for idx, (_, status_type) in enumerate(status_columns):
+            total_cells[6 + idx].text = str(totals.get(f'status_{status_type}', 0))
+
+        # Форматирование итоговой строки
+        for cell in total_cells:
             for paragraph in cell.paragraphs:
                 for run in paragraph.runs:
-                    run.font.size = Pt(8)
-
-        row_idx += 1
-
-    # Строка итогов
-    total_cells = table.rows[row_idx].cells
-    total_cells[0].text = ''
-    total_cells[1].text = 'ОБЩЕЕ'
-    total_cells[2].text = str(totals['staffing'])
-    total_cells[3].text = f"{totals['on_list']} +{totals['seconded_in']}"
-    total_cells[4].text = str(totals['vacant'])
-    total_cells[5].text = str(totals['in_lineup'])
-
-    for idx, (_, status_type) in enumerate(status_columns):
-        total_cells[6 + idx].text = str(totals.get(f'status_{status_type}', 0))
-
-    # Форматирование итоговой строки
-    for cell in total_cells:
-        for paragraph in cell.paragraphs:
-            for run in paragraph.runs:
-                run.font.bold = True
-                run.font.size = Pt(10)
+                    run.font.bold = True
+                    run.font.size = Pt(10)
 
 
 def generate_personnel_report_docx(

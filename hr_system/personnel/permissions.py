@@ -12,7 +12,7 @@ import datetime
 from rest_framework.permissions import BasePermission, SAFE_METHODS
 from django.utils import timezone
 
-from .models import UserRole, Employee, EmployeeStatusType, Division, SecondmentRequest
+from .models import UserRole, Employee, EmployeeStatusType, Division, SecondmentRequest, DivisionType
 
 
 class IsReadOnly(BasePermission):
@@ -177,39 +177,59 @@ class IsRole5(BaseRolePermission):
 
 class IsRole6(BaseRolePermission):
     """
-    Allows editing within the user's own office/department.  In addition to
-    the base checks, write operations are only permitted during working
-    hours (08:00–18:00 local time).  Users who are currently
-    seconded out are denied edit access.
+    Роль-6: Просмотр департамента + редактирование только своего отдела.
+    Согласно ТЗ п.5.1
     """
 
     def has_permission(self, request, view):
         profile = self.get_profile(request.user)
         if not (profile and profile.role == UserRole.ROLE_6 and profile.division_assignment):
             return False
-        # Enforce working hours for write operations
+
+        # Только чтение для просмотра департамента
+        if request.method in SAFE_METHODS:
+            return True
+
+        # Проверка рабочего времени для записи
         if not self.within_work_hours(request):
             return False
-        # Deny if the user is currently seconded out
+
+        # Проверка откомандирования
         try:
-            is_seconded_out = Employee.objects.filter(
-                user=request.user,
-                status_logs__status=EmployeeStatusType.SECONDED_OUT,
-                status_logs__date_to__isnull=True,
-            ).exists()
-            if is_seconded_out:
+            employee = Employee.objects.get(user=request.user)
+            if employee.is_seconded_out():
                 return False
         except Employee.DoesNotExist:
-            return False
+            pass
+
         return True
 
     def has_object_permission(self, request, view, obj):
         profile = self.get_profile(request.user)
         if not profile or not profile.division_assignment:
             return False
-        assigned_division = profile.division_assignment
+
+        # Для чтения - доступ к департаменту и его подразделениям
+        if request.method in SAFE_METHODS:
+            if isinstance(obj, (Employee, Division)):
+                target_div = obj.division if isinstance(obj, Employee) else obj
+                # Находим родительский департамент
+                current = target_div
+                while current:
+                    if current.division_type == DivisionType.DEPARTMENT:
+                        # Проверяем, относится ли отдел пользователя к этому департаменту
+                        user_dept = profile.division_assignment
+                        while user_dept:
+                            if user_dept.parent_division == current or user_dept == current:
+                                return True
+                            user_dept = user_dept.parent_division
+                    current = current.parent_division
+            return False
+
+        # Для записи - только свой отдел
         if isinstance(obj, Employee):
-            return obj.division == assigned_division
+            return obj.division == profile.division_assignment
         elif isinstance(obj, Division):
-            return obj == assigned_division
+            return obj == profile.division_assignment
+
         return False

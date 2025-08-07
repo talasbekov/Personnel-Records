@@ -48,26 +48,27 @@ class DivisionSerializer(serializers.ModelSerializer):
         source='get_division_type_display',
         read_only=True
     )
-    hierarchy_variant_display = serializers.CharField(
-        source='get_hierarchy_variant_display',
-        read_only=True
-    )
+    # hierarchy_variant_display = serializers.CharField(
+    #     source='get_hierarchy_variant_display',
+    #     read_only=True
+    # )
     head_position_name = serializers.CharField(
         source='head_position.name',
         read_only=True
     )
     employee_count = serializers.SerializerMethodField()
     child_divisions_count = serializers.SerializerMethodField()
+    children = serializers.SerializerMethodField()
+    employees = serializers.SerializerMethodField()
 
     class Meta:
         model = Division
         fields = [
             'id', 'name', 'code', 'division_type', 'division_type_display',
             'parent_division', 'parent_division_name',
-            'hierarchy_variant', 'hierarchy_variant_display',
             'description', 'contact_info', 'head_position', 'head_position_name',
             'employee_count', 'child_divisions_count',
-            'created_at', 'updated_at',
+            'children', 'employees'
         ]
         read_only_fields = ['created_at', 'updated_at']
         extra_kwargs = {
@@ -77,40 +78,50 @@ class DivisionSerializer(serializers.ModelSerializer):
     def get_employee_count(self, obj):
         return obj.employees.filter(is_active=True).count()
 
+    def get_employees(self, obj):
+        if obj.child_divisions.exists():
+            return []
+        active = obj.employees.filter(is_active=True)
+        return EmployeeSerializer(active, many=True).data
+
     def get_child_divisions_count(self, obj):
         return obj.child_divisions.count()
 
-    def validate(self, attrs):
-        """Комплексная валидация подразделения"""
-        parent = attrs.get('parent_division')
-        division_type = attrs.get('division_type', self.instance.division_type if self.instance else None)
-        hierarchy_variant = attrs.get('hierarchy_variant', self.instance.hierarchy_variant if self.instance else None)
+    def get_children(self, obj):
+        children = obj.child_divisions.all()
+        return DivisionSerializer(children, many=True, context=self.context).data
 
-        if parent and division_type and hierarchy_variant:
-            # Валидация иерархии
-            if hierarchy_variant == 'VARIANT_1':
-                allowed_parents = {
-                    DivisionType.DEPARTMENT: [DivisionType.COMPANY],
-                    DivisionType.MANAGEMENT: [DivisionType.DEPARTMENT],
-                    DivisionType.OFFICE: [DivisionType.MANAGEMENT],
-                }
-            elif hierarchy_variant == 'VARIANT_2':
-                allowed_parents = {
-                    DivisionType.MANAGEMENT: [DivisionType.COMPANY],
-                    DivisionType.OFFICE: [DivisionType.MANAGEMENT],
-                }
-            else:  # VARIANT_3
-                allowed_parents = {
-                    DivisionType.OFFICE: [DivisionType.COMPANY],
-                }
-
-            if division_type in allowed_parents:
-                if parent.division_type not in allowed_parents[division_type]:
-                    raise serializers.ValidationError({
-                        'parent_division': f'{division_type} не может подчиняться {parent.division_type} в варианте {hierarchy_variant}'
-                    })
-
-        return attrs
+    # def validate(self, attrs):
+    #     """Комплексная валидация подразделения"""
+    #     parent = attrs.get('parent_division')
+    #     division_type = attrs.get('division_type', self.instance.division_type if self.instance else None)
+    #     hierarchy_variant = attrs.get('hierarchy_variant', self.instance.hierarchy_variant if self.instance else None)
+    #
+    #     if parent and division_type and hierarchy_variant:
+    #         # Валидация иерархии
+    #         if hierarchy_variant == 'VARIANT_1':
+    #             allowed_parents = {
+    #                 DivisionType.DEPARTMENT: [DivisionType.COMPANY],
+    #                 DivisionType.MANAGEMENT: [DivisionType.DEPARTMENT],
+    #                 DivisionType.OFFICE: [DivisionType.MANAGEMENT],
+    #             }
+    #         elif hierarchy_variant == 'VARIANT_2':
+    #             allowed_parents = {
+    #                 DivisionType.MANAGEMENT: [DivisionType.COMPANY],
+    #                 DivisionType.OFFICE: [DivisionType.MANAGEMENT],
+    #             }
+    #         else:  # VARIANT_3
+    #             allowed_parents = {
+    #                 DivisionType.OFFICE: [DivisionType.COMPANY],
+    #             }
+    #
+    #         if division_type in allowed_parents:
+    #             if parent.division_type not in allowed_parents[division_type]:
+    #                 raise serializers.ValidationError({
+    #                     'parent_division': f'{division_type} не может подчиняться {parent.division_type} в варианте {hierarchy_variant}'
+    #                 })
+    #
+    #     return attrs
 
 
 class DivisionDetailSerializer(DivisionSerializer):

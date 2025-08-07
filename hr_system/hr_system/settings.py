@@ -117,7 +117,16 @@ USE_I18N = True
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
-STATIC_URL = "static/"
+# URL, по которому будут доставаться статические файлы
+STATIC_URL = '/static/'
+
+# Абсолютный путь в файловой системе, куда collectstatic будет складывать файлы
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+# (Опционально) Дополнительные директории с вашими статикой
+STATICFILES_DIRS = [
+    os.path.join(BASE_DIR, 'static'),
+]
 
 # Media and file storage configuration.  Use MinIO/S3 compatible
 # storage backend for photos and generated reports.  In production,
@@ -125,14 +134,23 @@ STATIC_URL = "static/"
 # settings in a local settings file.  Bucket names and credentials
 # below are placeholders.
 MEDIA_URL = "/media/"
-DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
-AWS_S3_ENDPOINT_URL = os.getenv("AWS_S3_ENDPOINT_URL", "http://minio:9000")
-AWS_ACCESS_KEY_ID = os.getenv("AWS_ACCESS_KEY_ID", "minioadmin")
-AWS_SECRET_ACCESS_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "minioadmin")
-AWS_STORAGE_BUCKET_NAME = os.getenv("AWS_STORAGE_BUCKET_NAME", "hr-media")
-AWS_S3_REGION_NAME = os.getenv("AWS_S3_REGION_NAME", "us-east-1")
-AWS_S3_SIGNATURE_VERSION = "s3v4"
+MEDIA_STRUCTURE = {
+    'EMPLOYEE_PHOTOS': 'employee-photos/%Y/%m/',
+    'DOCUMENTS': 'documents/%Y/%m/%d/',
+    'EXPORTS': 'exports/temp/',
+}
+
+# Настройки MinIO/S3
+DEFAULT_FILE_STORAGE = 'storages.backends.s3boto3.S3Boto3Storage'
+AWS_S3_ENDPOINT_URL = os.getenv('MINIO_ENDPOINT', 'http://localhost:9000')
+AWS_ACCESS_KEY_ID = os.getenv('MINIO_ACCESS_KEY', 'minioadmin')
+AWS_SECRET_ACCESS_KEY = os.getenv('MINIO_SECRET_KEY', 'minioadmin')
+AWS_STORAGE_BUCKET_NAME = os.getenv('MINIO_BUCKET', 'hr-media')
+AWS_S3_REGION_NAME = 'us-east-1'
+AWS_S3_SIGNATURE_VERSION = 's3v4'
 AWS_DEFAULT_ACL = None
+AWS_S3_FILE_OVERWRITE = False
+AWS_S3_VERIFY = False
 
 # Default primary key field type
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -220,8 +238,8 @@ CHANNEL_LAYERS = {
 }
 
 # Celery configuration
-CELERY_BROKER_URL = "redis://localhost:6379/0"
-CELERY_RESULT_BACKEND = "redis://localhost:6379/0"
+CELERY_BROKER_URL = "redis://redis:6379/0"
+CELERY_RESULT_BACKEND = "redis://redis:6379/0"
 CELERY_ACCEPT_CONTENT = ["json"]
 CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"

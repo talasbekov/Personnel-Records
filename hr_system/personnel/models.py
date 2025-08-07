@@ -31,9 +31,9 @@ class DivisionHierarchy(models.TextChoices):
 
 
 class EmployeeStatusType(models.TextChoices):
-    """Статусы сотрудников согласно ТЗ"""
-    ON_DUTY_SCHEDULED = "ON_DUTY_SCHEDULED", _("В строю")
-    ON_DUTY_ACTUAL = "ON_DUTY", _("На дежурстве")
+    """Статусы сотрудников согласно ТЗ п.6.1"""
+    ON_DUTY_SCHEDULED = "ON_DUTY_SCHEDULED", _("В строю")  # Статус по умолчанию
+    ON_DUTY_ACTUAL = "ON_DUTY_ACTUAL", _("На дежурстве")
     AFTER_DUTY = "AFTER_DUTY", _("После дежурства")
     BUSINESS_TRIP = "BUSINESS_TRIP", _("В командировке")
     TRAINING_ETC = "TRAINING_ETC", _("Учёба/соревнования/конференция")
@@ -140,51 +140,55 @@ class Division(models.Model):
         ]
 
     def clean(self):
-        """Валидация для предотвращения циклических зависимостей"""
+        """Расширенная валидация для предотвращения некорректной иерархии"""
+        super().clean()
+
         if self.parent_division:
+            # Проверка на циклическую зависимость
             ancestor = self.parent_division
+            visited = {self.pk}
             while ancestor:
-                if ancestor == self:
-                    raise ValidationError(_("Невозможно установить потомка в качестве родителя (создаст цикл)."))
+                if ancestor.pk in visited:
+                    raise ValidationError(_("Обнаружена циклическая зависимость в иерархии."))
+                visited.add(ancestor.pk)
+                if ancestor.pk == self.pk:
+                    raise ValidationError(_("Невозможно установить потомка в качестве родителя."))
                 ancestor = ancestor.parent_division
 
-        # Валидация иерархии согласно выбранному варианту
-        if self.parent_division:
-            self._validate_hierarchy()
+            # Детальная валидация иерархии согласно ТЗ
+            self._validate_hierarchy_detailed()
 
-    def _validate_hierarchy(self):
-        """Валидация соответствия типа подразделения выбранной иерархии"""
+    def _validate_hierarchy_detailed(self):
+        """Детальная валидация соответствия типа подразделения выбранной иерархии"""
         variant = self.hierarchy_variant
         parent_type = self.parent_division.division_type
 
-        if variant == DivisionHierarchy.VARIANT_1:
-            # Компания → Департаменты → Управления → Отделы
-            allowed_parents = {
+        # Правила для каждого варианта иерархии
+        hierarchy_rules = {
+            DivisionHierarchy.VARIANT_1: {
                 DivisionType.DEPARTMENT: [DivisionType.COMPANY],
-                DivisionType.MANAGEMENT: [DivisionType.DEPARTMENT],
-                DivisionType.OFFICE: [DivisionType.MANAGEMENT],
-            }
-        elif variant == DivisionHierarchy.VARIANT_2:
-            # Компания → Управления → Отделы
-            allowed_parents = {
+                DivisionType.MANAGEMENT: [DivisionType.DEPARTMENT, DivisionType.COMPANY],  # Может подчиняться напрямую
+                DivisionType.OFFICE: [DivisionType.MANAGEMENT, DivisionType.DEPARTMENT, DivisionType.COMPANY],
+            },
+            DivisionHierarchy.VARIANT_2: {
                 DivisionType.MANAGEMENT: [DivisionType.COMPANY],
-                DivisionType.OFFICE: [DivisionType.MANAGEMENT],
-            }
-        else:  # VARIANT_3
-            # Компания → Отделы
-            allowed_parents = {
+                DivisionType.OFFICE: [DivisionType.MANAGEMENT, DivisionType.COMPANY],
+            },
+            DivisionHierarchy.VARIANT_3: {
                 DivisionType.OFFICE: [DivisionType.COMPANY],
             }
+        }
 
-        if self.division_type in allowed_parents:
-            if parent_type not in allowed_parents[self.division_type]:
-                raise ValidationError(
-                    _("Недопустимая иерархия: %(child_type)s не может подчиняться %(parent_type)s в варианте %(variant)s") % {
-                        'child_type': self.get_division_type_display(),
-                        'parent_type': self.parent_division.get_division_type_display(),
-                        'variant': self.get_hierarchy_variant_display()
-                    }
-                )
+        allowed_parents = hierarchy_rules.get(variant, {}).get(self.division_type, [])
+
+        if allowed_parents and parent_type not in allowed_parents:
+            raise ValidationError(
+                _("В варианте %(variant)s подразделение типа %(child_type)s не может подчиняться %(parent_type)s") % {
+                    'variant': self.get_hierarchy_variant_display(),
+                    'child_type': self.get_division_type_display(),
+                    'parent_type': self.parent_division.get_division_type_display()
+                }
+            )
 
     def save(self, *args, **kwargs):
         # Автогенерация кода если не указан

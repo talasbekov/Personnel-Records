@@ -4,6 +4,8 @@ attrs==25.3.0
 autobahn==24.4.2
 Automat==25.4.16
 billiard==4.2.1
+boto3==1.34.0
+botocore==1.34.162
 celery==5.5.3
 celery-types==0.23.0
 cffi==1.17.1
@@ -19,6 +21,7 @@ daphne==4.2.1
 Django==5.2.4
 django-filter==25.1
 django-pytest==0.2.0
+django-storages==1.14.2
 djangorestframework==3.16.0
 djangorestframework_simplejwt==5.5.1
 drf-yasg==1.21.10
@@ -29,6 +32,7 @@ idna==3.10
 incremental==24.7.2
 inflection==0.5.1
 iniconfig==2.1.0
+jmespath==1.0.1
 kombu==5.5.4
 lxml==6.0.0
 openpyxl==3.1.5
@@ -49,7 +53,9 @@ python-dateutil==2.9.0.post0
 python-docx==1.1.2
 pytz==2025.2
 PyYAML==6.0.2
+redis==6.3.0
 reportlab==4.4.3
+s3transfer==0.9.0
 service-identity==24.2.0
 setuptools==80.9.0
 six==1.17.0
@@ -59,6 +65,7 @@ txaio==25.6.1
 typing_extensions==4.14.1
 tzdata==2025.2
 uritemplate==4.2.0
+urllib3==2.5.0
 vine==5.1.0
 wcwidth==0.2.13
 zope.interface==7.2
