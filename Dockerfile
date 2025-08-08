@@ -19,4 +19,4 @@ COPY . /code/
 # Collect static files
 RUN python manage.py collectstatic --noinput
 
-CMD ["gunicorn", "hr_system.wsgi:application", "--bind", "0.0.0.0:8000"]
+CMD ["gunicorn", "hr_system.wsgi:application", "--bind", "0.0.0.0:${PORT}"]
