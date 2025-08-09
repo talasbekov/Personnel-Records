@@ -38,9 +38,9 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 # SECURITY
 # NOTE: replace this key in production
-SECRET_KEY = "django-insecure-dummy-key-for-now"
+SECRET_KEY = "django-insecure-^18w8^kyktt4q14w%c4tci%w(8po97jj2pd&3(#hv(dyn3hznv"
 DEBUG = True  # Set to False in production
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ['*']
 
 # Application definition
 INSTALLED_APPS = [
