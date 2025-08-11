@@ -41,6 +41,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = "django-insecure-^18w8^kyktt4q14w%c4tci%w(8po97jj2pd&3(#hv(dyn3hznv"
 DEBUG = True  # Set to False in production
 ALLOWED_HOSTS = ['*']
+PUBLIC_BASE_URL='https://8000-cs-b2a0d15e-4572-48b5-9865-93ff835b3961.cs-europe-west4-bhnf.cloudshell.dev'
+
 
 # Application definition
 INSTALLED_APPS = [
@@ -210,8 +212,11 @@ SWAGGER_SETTINGS = {
     },
     "USE_SESSION_AUTH": False,
     "DEFAULT_INFO": "hr_system.urls.api_info",
+    "DEFAULT_API_URL": PUBLIC_BASE_URL
 }
 
+USE_X_FORWARDED_HOST = True
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Caching configuration – using local memory cache by default.
 # For production environments consider using Memcached or Redis for better
