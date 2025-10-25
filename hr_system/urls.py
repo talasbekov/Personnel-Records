@@ -5,8 +5,8 @@ from django.urls import path, include
 from rest_framework_simplejwt.views import TokenRefreshView, TokenVerifyView
 
 from rest_framework import permissions
-from django.conf import settings  # <-- добавили
-from ..personnel.views import MyTokenObtainPairView  # <-- фикс относительного импорта
+from django.conf import settings
+from personnel.views import MyTokenObtainPairView  # <-- исправленный импорт
 
 from drf_yasg.views import get_schema_view
 from drf_yasg import openapi
@@ -27,7 +27,7 @@ SchemaView = get_schema_view(
     info=api_info,
     public=True,
     permission_classes=(permissions.AllowAny,),
-    url=getattr(settings, "PUBLIC_BASE_URL", None),  # <-- ключевая строка
+    url=getattr(settings, "PUBLIC_BASE_URL", None),
 )
 
 urlpatterns = [

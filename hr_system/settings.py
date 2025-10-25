@@ -41,7 +41,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = "django-insecure-^18w8^kyktt4q14w%c4tci%w(8po97jj2pd&3(#hv(dyn3hznv"
 DEBUG = True  # Set to False in production
 ALLOWED_HOSTS = ['*']
-PUBLIC_BASE_URL='https://8000-cs-b2a0d15e-4572-48b5-9865-93ff835b3961.cs-europe-west4-bhnf.cloudshell.dev'
+PUBLIC_BASE_URL='http://127.0.0.1:8000'
 
 
 # Application definition
@@ -62,11 +62,13 @@ INSTALLED_APPS = [
     "notifications",
     "channels",
     "analytics",
+    "corsheaders",
 ]
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
@@ -96,11 +98,15 @@ TEMPLATES = [
 WSGI_APPLICATION = "hr_system.wsgi.application"
 ASGI_APPLICATION = "hr_system.asgi.application"
 
-# Database
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": "hr_system",
+        "USER": "hr_user",
+        "PASSWORD": "hr_password",
+        "HOST": "db",
+        "PORT": "5432",
+        "CONN_MAX_AGE": 60,
     }
 }
 
@@ -128,6 +134,25 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 # (Опционально) Дополнительные директории с вашими статикой
 STATICFILES_DIRS = [
     os.path.join(BASE_DIR, 'static'),
+]
+
+# CORS_ALLOW_ALL_ORIGINS = True
+# CORS_ALLOW_HEADERS = ["authorization", "content-type", "x-csrftoken"]
+# CORS_EXPOSE_HEADERS = ["content-type", "x-csrftoken"]
+# CORS_ALLOW_CREDENTIALS = False
+#
+# SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+# USE_X_FORWARDED_HOST = True
+# SESSION_COOKIE_SECURE = True
+# CSRF_COOKIE_SECURE = True
+CORS_ALLOW_ALL_ORIGINS = True
+CORS_ALLOW_CREDENTIALS = True
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost",
+    "http://localhost:8000",
+    "http://127.0.0.1",
+    "http://127.0.0.1:8000",
 ]
 
 # Media and file storage configuration.  Use MinIO/S3 compatible
@@ -212,11 +237,11 @@ SWAGGER_SETTINGS = {
     },
     "USE_SESSION_AUTH": False,
     "DEFAULT_INFO": "hr_system.urls.api_info",
-    "DEFAULT_API_URL": PUBLIC_BASE_URL
+    "DEFAULT_API_URL": PUBLIC_BASE_URL,
 }
 
-USE_X_FORWARDED_HOST = True
-SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+# USE_X_FORWARDED_HOST = True
+# SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 # Caching configuration – using local memory cache by default.
 # For production environments consider using Memcached or Redis for better
@@ -290,3 +315,5 @@ CELERY_BEAT_SCHEDULE = {
         "schedule": crontab(minute=10, hour=0),
     },
 }
+
+INTERNAL_IPS = ["127.0.0.1", "localhost"]

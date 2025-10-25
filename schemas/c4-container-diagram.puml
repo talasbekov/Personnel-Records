@@ -1,0 +1,76 @@
+@startuml C4_Container
+!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
+
+LAYOUT_TOP_DOWN()
+LAYOUT_WITH_LEGEND()
+
+title Диаграмма контейнеров системы "Расход Организации" (Монолитная архитектура)
+
+Person(user, "Пользователь системы", "Сотрудник с ролями 1-6")
+
+System_Ext(auth_system, "Внешняя система авторизации", "Предоставляет JWT токены")
+System_Ext(email_system, "Email сервер", "Отправка уведомлений")
+
+System_Boundary(org_system, "Система 'Расход Организации'") {
+
+    Container(web_app, "Web Application", "React/Vue.js SPA", "Пользовательский интерфейс для управления организацией")
+
+    Container(web_server, "Web Server", "Nginx", "Статические файлы, reverse proxy")
+
+    Container(monolith_app, "Monolithic Application", "Django/DRF", "Единое приложение со всеми модулями:\n- Division Management\n- Employee Management\n- Status Management\n- Secondment Management\n- Report Generation\n- Notification\n- Auth & RBAC\n- Audit Logging")
+
+    ContainerDb(database, "Database", "PostgreSQL", "Единая БД со всеми таблицами:\n- divisions\n- employees\n- positions\n- statuses\n- secondments\n- reports\n- users\n- audit_logs")
+
+    ContainerDb(file_storage, "File Storage", "File System", "Хранение отчетов и фотографий сотрудников на диске")
+}
+
+' User interactions
+Rel(user, web_app, "Использует", "HTTPS")
+Rel(web_app, web_server, "HTTP запросы", "HTTPS")
+
+' Web Server to App
+Rel(web_server, auth_system, "Валидирует JWT", "HTTPS")
+Rel(web_server, monolith_app, "Проксирует запросы", "HTTP")
+
+' Monolith to Database
+Rel(monolith_app, database, "Читает/пишет все данные", "SQL/TCP")
+
+' Monolith to File Storage
+Rel(monolith_app, file_storage, "Сохраняет/читает файлы", "File I/O")
+
+' Monolith to Email
+Rel(monolith_app, email_system, "Отправляет уведомления", "SMTP")
+
+' Auth flow
+Rel(monolith_app, auth_system, "Проверяет токены (опционально)", "HTTPS")
+
+note right of monolith_app
+  **Модули монолита:**
+  - Division Module: структура организации
+  - Employee Module: сотрудники и штатное расписание
+  - Status Module: статусы сотрудников
+  - Secondment Module: прикомандирование
+  - Report Module: генерация отчетов (синхронная)
+  - Notification Module: отправка уведомлений
+  - Auth Module: RBAC, проверка прав
+  - Audit Module: журналирование операций
+
+  **Все операции синхронные:**
+  - Генерация отчетов блокирует запрос
+  - Email отправляется в основном потоке
+  - Нет фоновых задач
+end note
+
+note right of database
+  **Все таблицы в одной БД:**
+  - divisions, departments, directorates
+  - employees, positions, vacancies
+  - employee_statuses, status_history
+  - secondment_requests, secondment_approvals
+  - report_templates, generated_reports
+  - users, roles, permissions
+  - audit_logs, change_history
+end note
+
+SHOW_LEGEND()
+@enduml
