@@ -1013,6 +1013,75 @@
 | **Управление справочниками** | ✗ | ✗ | ✗ | ✓ | ✗ | ✗ |
 | **Просмотр портала сотрудников** | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 
+### 7.3.1 Перечень системных прав
+- Divisions
+    - divisions.view_structure
+    - divisions.create_unit
+    - divisions.update_unit
+    - divisions.delete_unit
+    - divisions.move_unit
+
+- Employees
+    - employees.view
+    - employees.create
+    - employees.update
+    - employees.fire
+    - employees.transfer_internal
+    - employees.transfer_cross_department
+    - employees.photo_update
+    - employees.export_list
+
+- Statuses
+    - statuses.view
+    - statuses.set_current
+    - statuses.plan
+    - statuses.extend
+    - statuses.finish_early
+    - statuses.bulk_set
+
+- Secondments
+    - secondments.view
+    - secondments.initiate_outbound
+    - secondments.approve_inbound
+    - secondments.extend
+    - secondments.finish
+    - secondments.request_return
+    - secondments.approve_return
+
+- Staffing & Vacancies
+    - staffing.view
+    - staffing.edit_quota
+    - vacancies.create
+    - vacancies.update
+    - vacancies.close
+    - vacancies.view_portal
+
+- Reports
+    - reports.view
+    - reports.generate
+    - reports.export
+    - reports.templates.manage
+    - reports.publish_shared
+
+- Dictionaries
+    - dictionaries.view
+    - dictionaries.manage
+
+- Auth
+    - auth.users.view
+    - auth.users.manage
+    - auth.roles.assign
+    - auth.scope.set
+    - auth.users.block
+
+- Audit
+    - audit.view
+    - audit.export
+
+- Notifications
+    - notifications.view
+    - notifications.settings.manage
+
 ### 7.4 Зоны ответственности
 
 **Определение зоны ответственности:**
