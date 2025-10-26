@@ -7,7 +7,7 @@ from organization_management.apps.dictionaries.models import (
     VacancyReason,
     EducationType,
     DocumentType,
-    SystemSetting,
+    SystemSetting
 )
 
 class PositionSerializer(serializers.ModelSerializer):
