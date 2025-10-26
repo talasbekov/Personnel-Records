@@ -22,16 +22,11 @@ from rest_framework.response import Response
 from django.db.models import Count, Q, F
 from django.utils import timezone
 
-from personnel.models import (
-    Division,
-    Employee,
-    EmployeeStatusLog,
-    EmployeeStatusType,
-    Vacancy,
-    StaffingUnit,
-    DivisionStatusUpdate,
-    UserRole,
-)
+from organization_management.apps.divisions.models import Division
+from organization_management.apps.employees.models import Employee, Vacancy, StaffingUnit
+from organization_management.apps.statuses.models import EmployeeStatusLog, EmployeeStatusType, DivisionStatusUpdate
+from organization_management.apps.auth.models import UserRole
+from organization_management.apps.divisions.api.views import _gather_descendant_ids
 
 
 class AnalyticsViewSet(viewsets.ViewSet):
@@ -67,7 +62,6 @@ class AnalyticsViewSet(viewsets.ViewSet):
         if not assigned_division:
             return base_queryset.none()
         # gather descendant IDs if children included or role 2
-        from personnel.views import _gather_descendant_ids
         if profile.role == UserRole.ROLE_2 or (
             profile.role == UserRole.ROLE_5 and getattr(profile, "include_child_divisions", False)
         ):

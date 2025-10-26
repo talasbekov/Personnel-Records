@@ -2,7 +2,10 @@
 # Запустите этот скрипт через Django shell: python manage.py shell < create_users.py
 
 from django.contrib.auth.models import User
-from personnel.models import UserProfile, Division, Position, Employee, UserRole, DivisionType
+from organization_management.apps.auth.models import UserProfile, UserRole
+from organization_management.apps.divisions.models import Division, DivisionType
+from organization_management.apps.dictionaries.models import Position
+from organization_management.apps.employees.models import Employee
 
 # Создаем суперпользователя (если еще нет)
 if not User.objects.filter(username='admin').exists():
