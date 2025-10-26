@@ -3,9 +3,17 @@ from rest_framework import viewsets, filters
 from rest_framework.permissions import IsAuthenticated
 from organization_management.apps.statuses.models import EmployeeStatusLog
 from .serializers import EmployeeStatusLogSerializer
-from organization_management.apps.auth.permissions import IsRole1, IsRole2, IsRole3, IsRole4, IsRole5, IsRole6
+from organization_management.apps.auth.permissions import (
+    IsRole1,
+    IsRole2,
+    IsRole3,
+    IsRole4,
+    IsRole5,
+    IsRole6,
+)
 from organization_management.apps.auth.models import UserRole
 from organization_management.apps.statuses.application.services import StatusApplicationService
+from django.db.models import Q
 
 
 def _gather_descendant_ids(division):
@@ -68,9 +76,7 @@ class EmployeeStatusLogViewSet(viewsets.ModelViewSet):
 
         date_to = self.request.query_params.get('date_to')
         if date_to:
-            queryset = queryset.filter(
-                Q(date_to__lte=date_to) | Q(date_to__isnull=True)
-            )
+            queryset = queryset.filter(Q(date_to__lte=date_to) | Q(date_to__isnull=True))
 
         is_auto_copied = self.request.query_params.get('is_auto_copied')
         if is_auto_copied is not None:
@@ -86,5 +92,5 @@ class EmployeeStatusLogViewSet(viewsets.ModelViewSet):
             status=data['status'],
             date_from=data['date_from'],
             date_to=data.get('date_to'),
-            comment=data.get('comment')
+            comment=data.get('comment'),
         )

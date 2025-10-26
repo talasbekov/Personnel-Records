@@ -3,6 +3,7 @@ from django.contrib.auth import authenticate
 from django.utils.translation import gettext_lazy as _
 from organization_management.apps.auth.models import User, UserRole
 
+
 class LoginSerializer(serializers.Serializer):
     """
     Сериализатор для аутентификации пользователя и получения токена.
@@ -19,8 +20,11 @@ class LoginSerializer(serializers.Serializer):
         password = attrs.get('password')
 
         if username and password:
-            user = authenticate(request=self.context.get('request'),
-                                username=username, password=password)
+            user = authenticate(
+                request=self.context.get('request'),
+                username=username,
+                password=password
+            )
             if not user:
                 msg = _('Невозможно войти с предоставленными учетными данными.')
                 raise serializers.ValidationError(msg, code='authorization')
@@ -46,7 +50,6 @@ class UserSerializer(serializers.ModelSerializer):
         read_only_fields = ('id',)
 
     def create(self, validated_data):
-        # Используем `create_user` для правильного хеширования пароля
         user = User.objects.create_user(
             username=validated_data['username'],
             password=validated_data['password'],

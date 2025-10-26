@@ -4,9 +4,11 @@ from rest_framework import authentication
 from rest_framework.exceptions import AuthenticationFailed
 from organization_management.apps.auth.models import User
 
+
 class JWTAuthentication(authentication.BaseAuthentication):
     """
     Кастомный класс аутентификации для проверки JWT токенов.
+    Поддерживает стандарт Bearer и проверку подписи.
     """
     def authenticate(self, request):
         auth_header = authentication.get_authorization_header(request).split()

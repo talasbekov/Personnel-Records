@@ -12,9 +12,6 @@ class AuditLogModelTest(TestCase):
         cls.division = Division.objects.create(name='Test Division', division_type=DivisionType.DEPARTMENT)
 
     def test_create_audit_log(self):
-        """
-        Test that an AuditLog entry can be created successfully.
-        """
         log_entry = AuditLog.objects.create(
             user=self.user,
             action_type='CREATE',

@@ -1,14 +1,12 @@
 import pytest
-from django.contrib.auth.models import User
 from django.utils import timezone
 
 from organization_management.apps.secondments.models import SecondmentRequest
-from organization_management.apps.statuses.models import EmployeeStatusLog
+from organization_management.apps.statuses.models import EmployeeStatusLog, EmployeeStatusType
 from organization_management.apps.employees.models import Vacancy, Employee
 from organization_management.apps.divisions.models import Division, DivisionType
 from organization_management.apps.dictionaries.models import Position
-from organization_management.apps.auth.models import User, UserRole
-from organization_management.apps.statuses.models import EmployeeStatusType
+from organization_management.apps.auth.models import User, UserRole, UserProfile
 from notifications.models import Notification
 
 # Optional imports for websocket test

@@ -10,6 +10,7 @@ from organization_management.apps.dictionaries.models import (
     SystemSetting,
 )
 
+
 class Command(BaseCommand):
     help = 'Initializes the dictionaries with some default data'
 
