@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from organization_management.apps.\1.models import (
+from organization_management.apps.dictionaries.models import (
     Position,
     StatusType,
     DismissalReason,
@@ -9,6 +9,7 @@ from organization_management.apps.\1.models import (
     DocumentType,
     SystemSetting,
 )
+
 
 class Command(BaseCommand):
     help = 'Initializes the dictionaries with some default data'

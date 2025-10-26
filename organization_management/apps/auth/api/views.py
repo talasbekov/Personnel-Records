@@ -1,69 +1,62 @@
 from __future__ import annotations
-from rest_framework import viewsets, filters
-from rest_framework.permissions import IsAuthenticated
-from rest_framework_simplejwt.views import TokenObtainPairView
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+import jwt
+import datetime
+from django.conf import settings
+from rest_framework import status, viewsets, filters
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework.permissions import AllowAny, IsAuthenticated
+from drf_yasg.utils import swagger_auto_schema
+
 from organization_management.apps.auth.models import User, UserRole
-from .serializers import UserProfileSerializer
 from organization_management.apps.auth.permissions import IsRole4
 from organization_management.apps.employees.models import Employee
+from .serializers import LoginSerializer, UserSerializer
 
 
-class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
-    """Расширенный сериализатор для JWT токенов с информацией о роли"""
+class LoginAPIView(APIView):
+    """
+    API View для аутентификации пользователя и получения JWT токена.
+    """
+    permission_classes = [AllowAny]
+    serializer_class = LoginSerializer
 
-    def validate(self, attrs):
-        data = super().validate(attrs)
+    @swagger_auto_schema(request_body=LoginSerializer)
+    def post(self, request, *args, **kwargs):
+        serializer = self.serializer_class(data=request.data, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        user = serializer.validated_data['user']
 
-        try:
-            user = User.objects.get(username=self.user.username)
-            data['role'] = user.role
-            data['role_display'] = UserRole(user.role).label
-            data['division_id'] = user.division_assignment.id if user.division_assignment else None
-            data['division_name'] = user.division_assignment.name if user.division_assignment else None
+        payload = {
+            'user_id': user.id,
+            'exp': datetime.datetime.utcnow() + datetime.timedelta(days=1),
+            'iat': datetime.datetime.utcnow(),
+            'role': user.role,
+        }
+        token = jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
 
-            try:
-                employee = user.employee
-                data['employee_id'] = employee.id
-                data['employee_name'] = employee.full_name
-            except Employee.DoesNotExist:
-                data['employee_id'] = None
-                data['employee_name'] = None
-
-        except Exception:
-            data['role'] = None
-            data['role_display'] = None
-            data['division_id'] = None
-            data['division_name'] = None
-
-        return data
-
-
-class MyTokenObtainPairView(TokenObtainPairView):
-    serializer_class = MyTokenObtainPairSerializer
+        return Response({
+            'token': token,
+            'user_id': user.id,
+            'username': user.username,
+            'role': user.get_role_display(),
+        }, status=status.HTTP_200_OK)
 
 
-class UserProfileViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing user profiles."""
-
-    queryset = User.objects.all()
-    serializer_class = UserProfileSerializer
+class UserViewSet(viewsets.ModelViewSet):
+    """
+    ViewSet для управления пользователями.
+    Доступно только для системных администраторов (Роль-4).
+    """
+    queryset = User.objects.select_related('division_assignment').order_by('id')
+    serializer_class = UserSerializer
+    permission_classes = [IsAuthenticated, IsRole4]
     filter_backends = [filters.OrderingFilter]
-    ordering_fields = ['user__username', 'role']
-    ordering = ['user__username']
-
-    def get_permissions(self):
-        if self.action in ['list', 'retrieve']:
-            permission_classes = [IsAuthenticated, IsRole4]
-        else:
-            permission_classes = [IsAuthenticated, IsRole4]
-        return [permission() for permission in permission_classes]
+    ordering_fields = ['username', 'role']
+    ordering = ['username']
 
     def get_queryset(self):
-        queryset = User.objects.select_related(
-            'division_assignment'
-        )
-
+        queryset = super().get_queryset()
         role = self.request.query_params.get('role')
         if role:
             queryset = queryset.filter(role=role)

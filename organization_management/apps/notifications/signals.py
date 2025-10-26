@@ -4,20 +4,20 @@ Signal handlers for notifications.
 These receivers listen to model events across the personnel
 application and generate corresponding ``Notification`` records.  When
 Channels is installed and properly configured, the receivers also
-broadcast real‑time messages over WebSocket so that clients can
+broadcast real-time messages over WebSocket so that clients can
 immediately reflect state changes without polling.
 """
 
 from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.contrib.auth.models import User
-from organization_management.apps.\1.models import SecondmentRequest
-from organization_management.apps.\1.models import EmployeeStatusLog
-from organization_management.apps.\1.models import Vacancy, Employee
+from organization_management.apps.secondments.models import SecondmentRequest
+from organization_management.apps.statuses.models import EmployeeStatusLog
+from organization_management.apps.employees.models import Vacancy, Employee
 from .models import Notification, NotificationType
 
-# Attempt to import Channels components for real‑time notifications.  If
-# Channels is not installed or misconfigured, real‑time delivery will
+# Attempt to import Channels components for real-time notifications.  If
+# Channels is not installed or misconfigured, real-time delivery will
 # gracefully degrade to storing notifications in the database only.
 try:
     from channels.layers import get_channel_layer
@@ -30,13 +30,7 @@ except Exception:
 
 @receiver(post_save, sender=SecondmentRequest, dispatch_uid="create_secondment_notification")
 def create_secondment_notification(sender, instance, created, **kwargs):
-    """
-    Notify a recipient when a secondment request is created.
-
-    If the request is not yet approved, the notification is sent to a
-    superuser; once approved, the ``approved_by`` field is used.  The
-    related object ID is stored for client linking.
-    """
+    """Notify a recipient when a secondment request is created."""
     if created:
         recipient = instance.approved_by or User.objects.filter(is_superuser=True).first()
         if recipient:
@@ -56,13 +50,7 @@ def create_secondment_notification(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender=EmployeeStatusLog, dispatch_uid="create_status_update_notification")
 def create_status_update_notification(sender, instance, created, **kwargs):
-    """
-    Notify a user when their status has been updated.
-
-    Only logs that have an associated employee user will generate a
-    notification.  Real‑time messages are sent over the user's
-    personal WebSocket group if Channels is available.
-    """
+    """Notify a user when their status has been updated."""
     if created and instance.employee.user:
         Notification.objects.create(
             recipient=instance.employee.user,
@@ -76,7 +64,7 @@ def create_status_update_notification(sender, instance, created, **kwargs):
             related_model="EmployeeStatusLog",
             payload={"status_log_id": instance.id, "new_status": instance.status},
         )
-        # If real‑time channels are configured, send an immediate update
+        # If real-time channels are configured, send an immediate update
         if _has_channels:
             try:
                 channel_layer = get_channel_layer()
@@ -98,9 +86,7 @@ def create_status_update_notification(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender=Vacancy, dispatch_uid="create_vacancy_notification")
 def create_vacancy_notification(sender, instance, created, **kwargs):
-    """
-    Notify the creator of a vacancy when it is created.
-    """
+    """Notify the creator of a vacancy when it is created."""
     if created and instance.created_by:
         Notification.objects.create(
             recipient=instance.created_by,
@@ -121,9 +107,7 @@ def create_vacancy_notification(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender=Employee, dispatch_uid="create_employee_update_notification")
 def create_employee_update_notification(sender, instance, created, **kwargs):
-    """
-    Notify the employee when their profile is created or updated.
-    """
+    """Notify the employee when their profile is created or updated."""
     action = "created" if created else "updated"
     if instance.user:
         Notification.objects.create(
@@ -139,9 +123,7 @@ def create_employee_update_notification(sender, instance, created, **kwargs):
 
 @receiver(post_delete, sender=Employee, dispatch_uid="create_employee_delete_notification")
 def create_employee_delete_notification(sender, instance, **kwargs):
-    """
-    Notify superusers when an employee is deleted.
-    """
+    """Notify superusers when an employee is deleted."""
     recipients = User.objects.filter(is_superuser=True)
     for recipient in recipients:
         Notification.objects.create(

@@ -1,8 +1,8 @@
 from django.test import TestCase
-from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
+from organization_management.apps.auth.models import User, UserRole, UserProfile
 from .models import Notification, NotificationType
-from organization_management.apps.\1.models import UserProfile, UserRole
+
 
 class NotificationAPITest(APITestCase):
 
@@ -27,9 +27,7 @@ class NotificationAPITest(APITestCase):
         )
 
     def test_list_notifications_for_authenticated_user(self):
-        """
-        Ensure that the list view only returns notifications for the authenticated user.
-        """
+        """Ensure that the list view only returns notifications for the authenticated user."""
         self.client.force_authenticate(user=self.user1)
         url = '/api/notifications/'
         response = self.client.get(url)
@@ -38,9 +36,7 @@ class NotificationAPITest(APITestCase):
         self.assertEqual(response.data['results'][0]['title'], 'Notification 1')
 
     def test_mark_notification_as_read(self):
-        """
-        Ensure that a notification can be marked as read.
-        """
+        """Ensure that a notification can be marked as read."""
         self.client.force_authenticate(user=self.user1)
         self.assertFalse(self.notification1.is_read)
 
@@ -53,9 +49,7 @@ class NotificationAPITest(APITestCase):
         self.assertIsNotNone(self.notification1.read_at)
 
     def test_unauthenticated_user_cannot_access_api(self):
-        """
-        Ensure that unauthenticated users receive a 401 Unauthorized response.
-        """
+        """Ensure that unauthenticated users receive a 401 Unauthorized response."""
         url = '/api/notifications/'
         response = self.client.get(url)
         self.assertEqual(response.status_code, 401)

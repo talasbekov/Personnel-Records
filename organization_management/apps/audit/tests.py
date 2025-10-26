@@ -1,8 +1,8 @@
 from django.test import TestCase
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
-from organization_management.apps.\1.models import AuditLog
-from organization_management.apps.\1.models import Division, DivisionType
+from organization_management.apps.audit.models import AuditLog
+from organization_management.apps.divisions.models import Division, DivisionType
 
 class AuditLogModelTest(TestCase):
 
@@ -12,9 +12,6 @@ class AuditLogModelTest(TestCase):
         cls.division = Division.objects.create(name='Test Division', division_type=DivisionType.DEPARTMENT)
 
     def test_create_audit_log(self):
-        """
-        Test that an AuditLog entry can be created successfully.
-        """
         log_entry = AuditLog.objects.create(
             user=self.user,
             action_type='CREATE',
