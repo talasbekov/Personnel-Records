@@ -1,0 +1,29 @@
+# Django
+Django==5.0
+djangorestframework==3.14.0
+psycopg2-binary
+
+# Celery
+celery==5.3.6
+redis==5.0.1
+django-celery-results==2.5.1
+django-celery-beat==2.6.0
+
+# Channels
+channels==4.0.0
+channels-redis==4.2.0
+daphne
+
+# Reporting
+python-docx
+openpyxl
+reportlab
+Pillow
+XlsxWriter
+
+# Other
+django-cors-headers
+django-mptt
+PyJWT
+djangorestframework-recursive
+django-redis

@@ -1,8 +1,7 @@
 from rest_framework import serializers
 from django.contrib.auth import authenticate
 from django.utils.translation import gettext_lazy as _
-from organization_management.apps.auth.models import User, UserRole
-
+from organization_management.apps.auth.models import User
 
 class LoginSerializer(serializers.Serializer):
     """
@@ -42,11 +41,11 @@ class UserSerializer(serializers.ModelSerializer):
     Обеспечивает безопасное создание и обновление пользователей.
     """
     password = serializers.CharField(write_only=True, required=True, style={'input_type': 'password'})
-    role = serializers.ChoiceField(choices=UserRole.choices)
+    role = serializers.ChoiceField(choices=User.RoleType.choices)
 
     class Meta:
         model = User
-        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'role', 'division_assignment', 'password')
+        fields = ('id', 'username', 'email', 'first_name', 'last_name', 'role', 'division', 'is_seconded', 'password')
         read_only_fields = ('id',)
 
     def create(self, validated_data):
@@ -57,7 +56,8 @@ class UserSerializer(serializers.ModelSerializer):
             first_name=validated_data.get('first_name', ''),
             last_name=validated_data.get('last_name', ''),
             role=validated_data['role'],
-            division_assignment=validated_data.get('division_assignment')
+            division=validated_data.get('division'),
+            is_seconded=validated_data.get('is_seconded', False)
         )
         return user
 

@@ -1,10 +1,10 @@
 from django.urls import path, include
 from rest_framework.routers import DefaultRouter
-from organization_management.apps.statuses.api.views import EmployeeStatusLogViewSet
+from .views import EmployeeStatusViewSet
 
 router = DefaultRouter()
-router.register(r"status-logs", EmployeeStatusLogViewSet)
+router.register(r'statuses', EmployeeStatusViewSet, basename='employee-status')
 
 urlpatterns = [
-    path("", include(router.urls)),
+    path('', include(router.urls)),
 ]

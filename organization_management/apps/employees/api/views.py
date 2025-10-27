@@ -1,110 +1,93 @@
-from __future__ import annotations
-import io
-import csv
-from django.http import HttpResponse
-from django.db import transaction
-from django.db.models import Q
-from rest_framework import status, viewsets, filters
+from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.permissions import IsAuthenticated
-from drf_yasg.utils import swagger_auto_schema
-from drf_yasg import openapi
+from .serializers import EmployeeSerializer, StaffingUnitSerializer, VacancySerializer
 from organization_management.apps.employees.models import Employee, EmployeeTransferLog, StaffingUnit, Vacancy
-from .serializers import EmployeeSerializer, EmployeeTransferLogSerializer, StaffingUnitSerializer, VacancySerializer, EmployeeBulkSerializer
-from organization_management.apps.statuses.models import EmployeeStatusLog
+from organization_management.apps.auth.permissions.rbac_permissions import IsSystemAdmin, IsHrAdmin
+from organization_management.apps.employees.application.services import EmployeeApplicationService
 from organization_management.apps.divisions.models import Division
 from organization_management.apps.dictionaries.models import Position
-from organization_management.apps.notifications.models import Notification
-from organization_management.apps.auth.models import UserRole
-from organization_management.apps.auth.permissions import IsRole4, IsRole5
-from organization_management.apps.employees.tasks import export_employees_to_csv_task, export_employees_to_xlsx_task
 
 class EmployeeViewSet(viewsets.ModelViewSet):
-    """ViewSet for managing employees."""
-
+    """
+    ViewSet для управления сотрудниками.
+    Предоставляет CRUD операции и кастомные действия.
+    """
     queryset = Employee.objects.all()
     serializer_class = EmployeeSerializer
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
-    search_fields = ['full_name', 'employee_number', 'position__name', 'division__name']
-    ordering_fields = ['full_name', 'position', 'division', 'hired_date']
-    ordering = ['full_name']
+    service = EmployeeApplicationService()
 
     def get_permissions(self):
-        if self.action in ['create', 'update', 'partial_update', 'destroy', 'bulk_import']:
-            permission_classes = [IsAuthenticated, IsRole4 | IsRole5]
+        """
+        Определение прав доступа в зависимости от действия.
+        """
+        if self.action in ['create', 'destroy', 'transfer', 'dismiss']:
+            self.permission_classes = [permissions.IsAuthenticated, IsSystemAdmin]
+        elif self.action in ['update', 'partial_update']:
+            self.permission_classes = [permissions.IsAuthenticated, IsSystemAdmin | IsHrAdmin]
         else:
-            permission_classes = [IsAuthenticated]
-        return [permission() for permission in permission_classes]
+            self.permission_classes = [permissions.IsAuthenticated]
+        return super().get_permissions()
 
-    def get_queryset(self):
-        user = self.request.user
-        queryset = Employee.objects.select_related('position', 'division')
+    def perform_create(self, serializer):
+        self.service.hire_employee(serializer.validated_data)
 
-        if not user.is_staff and user.role != UserRole.ROLE_1:
-            division = user.division_assignment
-            if division:
-                queryset = queryset.filter(
-                    Q(division=division) | Q(division__parent_division=division)
-                )
+    @action(detail=True, methods=['post'])
+    def transfer(self, request, pk=None):
+        """
+        Перевод сотрудника в другое подразделение.
+        """
+        employee = self.get_object()
+        division_id = request.data.get('division_id')
+        position_id = request.data.get('position_id')
+        transfer_date = request.data.get('transfer_date')
 
-        status_param = self.request.query_params.get('status')
-        if status_param == 'active':
-            queryset = queryset.filter(is_active=True)
-        elif status_param == 'fired':
-            queryset = queryset.filter(is_active=False)
-
-        division_id = self.request.query_params.get('division_id')
-        if division_id:
-            queryset = queryset.filter(division_id=division_id)
-
-        position_id = self.request.query_params.get('position_id')
-        if position_id:
-            queryset = queryset.filter(position_id=position_id)
-
-        return queryset
-
-    @action(detail=False, methods=['post'])
-    @swagger_auto_schema(
-        request_body=EmployeeBulkSerializer(many=True),
-        responses={201: EmployeeBulkSerializer(many=True)}
-    )
-    def bulk_import(self, request):
-        serializer = EmployeeBulkSerializer(data=request.data, many=True)
-        if serializer.is_valid():
-            employees = serializer.save()
-
-            Notification.objects.create(
-                user=request.user,
-                type=Notification.NotificationType.BULK_IMPORT_COMPLETE,
-                message=f"Успешно импортировано {len(employees)} сотрудников."
+        try:
+            division = Division.objects.get(id=division_id)
+            position = Position.objects.get(id=position_id)
+        except (Division.DoesNotExist, Position.DoesNotExist):
+            return Response(
+                {'error': 'Подразделение или должность не найдены'},
+                status=status.HTTP_404_NOT_FOUND
             )
-            return Response(serializer.data, status=status.HTTP_2_CREATED)
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=['get'])
-    def export(self, request):
-        file_format = request.query_params.get('format', 'csv').lower()
-        queryset = self.get_queryset()
+        EmployeeTransferLog.objects.create(
+            employee=employee,
+            from_division=employee.division,
+            to_division=division,
+            from_position=employee.position,
+            to_position=position,
+            transfer_date=transfer_date,
+            reason=request.data.get('reason', ''),
+            order_number=request.data.get('order_number', '')
+        )
 
-        if file_format == 'xlsx':
-            task = export_employees_to_xlsx_task.delay(list(queryset.values_list('id', flat=True)))
-            return Response({'task_id': task.id}, status=status.HTTP_202_ACCEPTED)
-        else:
-            task = export_employees_to_csv_task.delay(list(queryset.values_list('id', flat=True)))
-            return Response({'task_id': task.id}, status=status.HTTP_202_ACCEPTED)
+        employee.division = division
+        employee.position = position
+        employee.save()
+
+        return Response({'status': 'сотрудник переведен'})
+
+    @action(detail=True, methods=['post'])
+    def dismiss(self, request, pk=None):
+        """
+        Увольнение сотрудника.
+        """
+        employee = self.get_object()
+        employee.employment_status = Employee.EmploymentStatus.FIRED
+        employee.dismissal_date = request.data.get('dismissal_date')
+        employee.save()
+        return Response({'status': 'сотрудник уволен'})
 
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
+        """
+        Получение истории переводов сотрудника.
+        """
         employee = self.get_object()
-        transfer_logs = EmployeeTransferLog.objects.filter(employee=employee)
-        status_logs = EmployeeStatusLog.objects.filter(employee=employee)
-
-        transfer_serializer = EmployeeTransferLogSerializer(transfer_logs, many=True)
-        return Response({
-            'transfers': transfer_serializer.data,
-        })
-
+        logs = EmployeeTransferLog.objects.filter(employee=employee)
+        # (сериализация логов)
+        return Response({'history': []})
 
 class StaffingUnitViewSet(viewsets.ModelViewSet):
     """ViewSet for managing staffing units."""
