@@ -1,100 +1,53 @@
-from __future__ import annotations
 from django.db import models
-from django.contrib.auth import get_user_model
-from django.utils import timezone
-from django.utils.translation import gettext_lazy as _
-
-class SecondmentStatus(models.TextChoices):
-    PENDING = "PENDING", _("Ожидает")
-    APPROVED = "APPROVED", _("Одобрено")
-    REJECTED = "REJECTED", _("Отклонено")
-    CANCELLED = "CANCELLED", _("Отменено")
-    RETURNED = "RETURNED", _("Возвращен")
-
+from django.conf import settings
 
 class SecondmentRequest(models.Model):
-    """Запросы на прикомандирование/откомандирование"""
-    employee = models.ForeignKey(
-        "employees.Employee",
-        on_delete=models.CASCADE,
-        related_name="secondment_requests",
-        verbose_name=_("Сотрудник")
-    )
+    """Запрос на прикомандирование"""
+
+    class ApprovalStatus(models.TextChoices):
+        PENDING = 'pending', 'Ожидает одобрения'
+        APPROVED = 'approved', 'Одобрен'
+        REJECTED = 'rejected', 'Отклонен'
+        CANCELLED = 'cancelled', 'Отменен'
+
+    employee = models.ForeignKey('employees.Employee', on_delete=models.CASCADE)
     from_division = models.ForeignKey(
-        "divisions.Division",
+        'divisions.Division',
         on_delete=models.CASCADE,
-        related_name="outgoing_secondments",
-        verbose_name=_("Из подразделения")
+        related_name='secondments_from'
     )
     to_division = models.ForeignKey(
-        "divisions.Division",
+        'divisions.Division',
         on_delete=models.CASCADE,
-        related_name="incoming_secondments",
-        verbose_name=_("В подразделение")
+        related_name='secondments_to'
     )
-    requested_by = models.ForeignKey(
-        get_user_model(),
-        on_delete=models.SET_NULL,
-        null=True,
-        related_name="requested_secondments",
-        verbose_name=_("Запросил")
-    )
-    approved_by = models.ForeignKey(
-        get_user_model(),
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="approved_secondments",
-        verbose_name=_("Одобрил")
-    )
+    start_date = models.DateField()
+    end_date = models.DateField()
+    reason = models.TextField()
     status = models.CharField(
         max_length=20,
-        choices=SecondmentStatus.choices,
-        default=SecondmentStatus.PENDING,
-        verbose_name=_("Статус")
+        choices=ApprovalStatus.choices,
+        default=ApprovalStatus.PENDING
     )
-    date_from = models.DateField(
-        verbose_name=_("Дата начала")
-    )
-    date_to = models.DateField(
+
+    requested_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
         null=True,
-        blank=True,
-        verbose_name=_("Дата окончания")
+        related_name='requested_secondments'
     )
-    reason = models.TextField(
-        verbose_name=_("Причина прикомандирования")
-    )
-    return_requested = models.BooleanField(
-        default=False,
-        verbose_name=_("Запрошен возврат")
-    )
-    return_requested_by = models.ForeignKey(
-        get_user_model(),
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        related_name="requested_returns",
-        verbose_name=_("Возврат запросил")
+        related_name='approved_secondments'
     )
-    return_approved_by = models.ForeignKey(
-        get_user_model(),
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name="approved_returns",
-        verbose_name=_("Возврат одобрил")
-    )
+    approved_at = models.DateTimeField(null=True, blank=True)
+    rejection_reason = models.TextField(blank=True)
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
-        verbose_name = _("Запрос на прикомандирование")
-        verbose_name_plural = _("Запросы на прикомандирование")
-        ordering = ["-created_at"]
-        indexes = [
-            models.Index(fields=["status", "date_from"]),
-            models.Index(fields=["employee", "status"]),
-        ]
-
-    def __str__(self):
-        return f"{self.employee.full_name}: {self.from_division.name} → {self.to_division.name}"
+        db_table = 'secondment_requests'

@@ -16,7 +16,6 @@ SECRET_KEY = "django-insecure-^18w8^kyktt4q14w%c4tci%w(8po97jj2pd&3(#hv(dyn3hznv
 
 # Application definition
 INSTALLED_APPS = [
-    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -30,19 +29,17 @@ INSTALLED_APPS = [
     'channels',
     'django_celery_beat',
     'django_celery_results',
-    'drf_yasg',
-    'rest_framework_simplejwt',
-    'django_filters',
+    'drf_spectacular',
 
     # Apps
-    'organization_management.apps.auth.apps.AuthConfig',
-    'organization_management.apps.audit',
     'organization_management.apps.divisions',
     'organization_management.apps.employees',
     'organization_management.apps.statuses',
     'organization_management.apps.secondments',
     'organization_management.apps.reports',
     'organization_management.apps.notifications',
+    'organization_management.apps.auth',
+    'organization_management.apps.audit',
     'organization_management.apps.dictionaries',
 ]
 
@@ -133,21 +130,9 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
-    'DEFAULT_PAGINATION_CLASS': 'organization_management.common.pagination.StandardResultsSetPagination',
+    'DEFAULT_PAGINATION_CLASS': 'organization_management.apps.common.pagination.StandardResultsSetPagination',
     'PAGE_SIZE': 50,
-    "DEFAULT_FILTER_BACKENDS": (
-        "django_filters.rest_framework.DjangoFilterBackend",
-        "rest_framework.filters.OrderingFilter",
-        "rest_framework.filters.SearchFilter",
-    ),
-    "DEFAULT_THROTTLE_CLASSES": [
-        "rest_framework.throttling.AnonRateThrottle",
-        "rest_framework.throttling.UserRateThrottle",
-    ],
-    "DEFAULT_THROTTLE_RATES": {
-        'user': '1000/day',
-        'anon': '50/day',
-    },
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
 # Celery Configuration
@@ -159,7 +144,7 @@ CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
 
 # Channels Configuration (WebSocket)
-ASGI_APPLICATION = 'config.asgi.application'
+ASGI_APPLICATION = 'organization_management.config.asgi.application'
 CHANNEL_LAYERS = {
     'default': {
         'BACKEND': 'channels_redis.core.RedisChannelLayer',
@@ -180,37 +165,3 @@ CACHES = {
     }
 }
 
-# Simple JWT settings
-SIMPLE_JWT = {
-    "ACCESS_TOKEN_LIFETIME": timedelta(minutes=60),
-    "REFRESH_TOKEN_LIFETIME": timedelta(days=1),
-    "ROTATE_REFRESH_TOKENS": False,
-    "BLACKLIST_AFTER_ROTATION": True,
-    "ALGORITHM": "HS256",
-    "AUTH_HEADER_TYPES": ("Bearer",),
-    "AUTH_HEADER_NAME": "HTTP_AUTHORIZATION",
-    "USER_ID_FIELD": "id",
-    "USER_ID_CLAIM": "user_id",
-}
-
-SWAGGER_SETTINGS = {
-    "SECURITY_DEFINITIONS": {
-        "Bearer": {
-            "type": "apiKey",
-            "name": "Authorization",
-            "in": "header",
-            "description": "Формат: Bearer {ваш access токен}",
-        }
-    },
-    "USE_SESSION_AUTH": False,
-    "DEFAULT_INFO": "config.urls.api_info",
-}
-
-CORS_ALLOW_ALL_ORIGINS = True
-CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = [
-    "http://localhost",
-    "http://localhost:8000",
-    "http://127.0.0.1",
-    "http://127.0.0.1:8000",
-]

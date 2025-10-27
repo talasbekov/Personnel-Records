@@ -1,5 +1,4 @@
 from django.contrib import admin
-from organization_management.apps.employees.models import Employee, EmployeeTransferLog
+from organization_management.apps.employees.models import Employee
 
 admin.site.register(Employee)
-admin.site.register(EmployeeTransferLog)
