@@ -1,5 +1,4 @@
 from django.contrib import admin
-from organization_management.apps.statuses.models import EmployeeStatusLog, DivisionStatusUpdate
+from organization_management.apps.statuses.models import EmployeeStatus
 
-admin.site.register(EmployeeStatusLog)
-admin.site.register(DivisionStatusUpdate)
+admin.site.register(EmployeeStatus)
