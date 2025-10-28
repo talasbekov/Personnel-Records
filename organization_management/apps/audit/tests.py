@@ -1,8 +1,9 @@
 from django.test import TestCase
 from django.contrib.auth.models import User
 from django.contrib.contenttypes.models import ContentType
-from organization_management.apps.audit.models import AuditLog
-from organization_management.apps.divisions.models import Division, DivisionType
+from organization_management.apps.audit.models import AuditEntry as AuditLog
+from organization_management.apps.divisions.models import Division
+DivisionType = Division.DivisionType
 
 class AuditLogModelTest(TestCase):
 

@@ -14,9 +14,9 @@ class EmployeeStatus(models.Model):
         SECONDED_FROM = 'seconded_from', 'Прикомандирован из'
         SECONDED_TO = 'seconded_to', 'Откомандирован в'
 
-    employee = models.ForeignKey('employees.Employee', on_delete=models.CASCADE)
-    status_type = models.CharField(max_length=20, choices=StatusType.choices)
-    start_date = models.DateField()
+    employee = models.ForeignKey('employees.Employee', on_delete=models.CASCADE, null=True)
+    status_type = models.CharField(max_length=20, choices=StatusType.choices, default=StatusType.IN_SERVICE)
+    start_date = models.DateField(default='1970-01-01')
     end_date = models.DateField(null=True, blank=True)
     comment = models.TextField(blank=True)
 

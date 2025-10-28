@@ -2,7 +2,8 @@ import pytest
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
-from organization_management.apps.auth.models import User, UserRole
+from organization_management.apps.auth.models import User
+UserRole = User.RoleType
 from organization_management.apps.divisions.models import Division
 
 @pytest.mark.django_db

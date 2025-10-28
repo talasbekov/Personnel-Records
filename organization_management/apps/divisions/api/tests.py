@@ -1,7 +1,10 @@
 from rest_framework.test import APITestCase
 from django.contrib.auth import get_user_model
-from organization_management.apps.divisions.models import Division, DivisionType
-from organization_management.apps.auth.models import UserRole
+from organization_management.apps.divisions.models import Division
+DivisionType = Division.DivisionType
+from organization_management.apps.auth.models import User
+from organization_management.apps.auth.models import User
+UserRole = User.RoleType
 
 class DivisionViewSetTest(APITestCase):
     def setUp(self):

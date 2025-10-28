@@ -1,4 +1,4 @@
-from organization_management.apps.employees.models import Employee, EmployeeTransferLog
+from organization_management.apps.employees.models import Employee
 from organization_management.apps.divisions.models import Division
 from organization_management.apps.dictionaries.models import Position
 from organization_management.apps.employees.domain.repositories import EmployeeRepository

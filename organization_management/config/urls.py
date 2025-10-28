@@ -19,4 +19,5 @@ urlpatterns = [
     path("api/notifications/", include("organization_management.apps.notifications.api.urls")),
     path("api/audit/", include("organization_management.apps.audit.api.urls")),
     path("api/dictionaries/", include("organization_management.apps.dictionaries.api.urls")),
+    path("api/staffing/", include("organization_management.apps.staffing.urls")),
 ]

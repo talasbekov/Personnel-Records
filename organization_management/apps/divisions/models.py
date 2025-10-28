@@ -10,9 +10,9 @@ class Division(MPTTModel):
         DIRECTORATE = 'directorate', 'Управление'
         DIVISION = 'division', 'Отдел'
 
-    name = models.CharField(max_length=255)
-    code = models.CharField(max_length=50, unique=True)
-    division_type = models.CharField(max_length=20, choices=DivisionType.choices)
+    name = models.CharField(max_length=255, default='')
+    code = models.CharField(max_length=50, unique=True, default='')
+    division_type = models.CharField(max_length=20, choices=DivisionType.choices, default=DivisionType.ORGANIZATION)
     parent = TreeForeignKey(
         'self',
         on_delete=models.CASCADE,

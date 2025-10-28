@@ -11,7 +11,8 @@ RUN apt-get update && apt-get install -y \
 
 # Install Python dependencies
 COPY requirements/ /app/requirements/
-RUN pip install --no-cache-dir -r requirements/production.txt
+RUN pip install --no-cache-dir -r requirements/base.txt
+RUN pip install --no-cache-dir -r requirements/development.txt
 
 # Copy project
 COPY . /app/

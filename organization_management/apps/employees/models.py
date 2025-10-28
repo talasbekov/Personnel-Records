@@ -12,18 +12,18 @@ class Employee(models.Model):
         FIRED = 'fired', 'Уволен'
 
     # Основная информация
-    personnel_number = models.CharField(max_length=20, unique=True)
-    last_name = models.CharField(max_length=100)
-    first_name = models.CharField(max_length=100)
+    personnel_number = models.CharField(max_length=20, unique=True, default='000000')
+    last_name = models.CharField(max_length=100, default='')
+    first_name = models.CharField(max_length=100, default='')
     middle_name = models.CharField(max_length=100, blank=True)
-    birth_date = models.DateField()
-    gender = models.CharField(max_length=1, choices=Gender.choices)
+    birth_date = models.DateField(default='1970-01-01')
+    gender = models.CharField(max_length=1, choices=Gender.choices, default='M')
     photo = models.ImageField(upload_to='employees/photos/', null=True, blank=True)
 
     # Служебная информация
-    division = models.ForeignKey('divisions.Division', on_delete=models.PROTECT)
-    position = models.ForeignKey('dictionaries.Position', on_delete=models.PROTECT)
-    hire_date = models.DateField()
+    division = models.ForeignKey('divisions.Division', on_delete=models.PROTECT, null=True)
+    position = models.ForeignKey('dictionaries.Position', on_delete=models.PROTECT, null=True)
+    hire_date = models.DateField(default='1970-01-01')
     dismissal_date = models.DateField(null=True, blank=True)
     employment_status = models.CharField(
         max_length=10,

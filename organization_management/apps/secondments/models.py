@@ -10,20 +10,22 @@ class SecondmentRequest(models.Model):
         REJECTED = 'rejected', 'Отклонен'
         CANCELLED = 'cancelled', 'Отменен'
 
-    employee = models.ForeignKey('employees.Employee', on_delete=models.CASCADE)
+    employee = models.ForeignKey('employees.Employee', on_delete=models.CASCADE, null=True)
     from_division = models.ForeignKey(
         'divisions.Division',
         on_delete=models.CASCADE,
-        related_name='secondments_from'
+        related_name='secondments_from',
+        null=True
     )
     to_division = models.ForeignKey(
         'divisions.Division',
         on_delete=models.CASCADE,
-        related_name='secondments_to'
+        related_name='secondments_to',
+        null=True
     )
-    start_date = models.DateField()
-    end_date = models.DateField()
-    reason = models.TextField()
+    start_date = models.DateField(default='1970-01-01')
+    end_date = models.DateField(default='1970-01-01')
+    reason = models.TextField(default='')
     status = models.CharField(
         max_length=20,
         choices=ApprovalStatus.choices,
