@@ -4,7 +4,8 @@ from organization_management.apps.employees.application.services import Employee
 from organization_management.apps.divisions.models import Division
 from organization_management.apps.dictionaries.models import Position
 from organization_management.apps.employees.models import Employee
-from organization_management.apps.auth.models import UserRole
+from organization_management.apps.auth.models import User
+UserRole = User.RoleType
 
 class EmployeeApplicationServiceTest(TestCase):
     def setUp(self):

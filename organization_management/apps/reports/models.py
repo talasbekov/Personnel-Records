@@ -21,8 +21,8 @@ class Report(models.Model):
         COMPLETED = 'completed', 'Готов'
         FAILED = 'failed', 'Ошибка'
 
-    report_type = models.CharField(max_length=50, choices=ReportType.choices)
-    report_format = models.CharField(max_length=10, choices=ReportFormat.choices)
+    report_type = models.CharField(max_length=50, choices=ReportType.choices, default=ReportType.PERSONNEL_ROSTER)
+    report_format = models.CharField(max_length=10, choices=ReportFormat.choices, default=ReportFormat.PDF)
 
     # Параметры отчета
     division = models.ForeignKey(
@@ -36,7 +36,7 @@ class Report(models.Model):
     filters = models.JSONField(default=dict, blank=True)
 
     # Результат
-    job_id = models.CharField(max_length=100, unique=True)
+    job_id = models.CharField(max_length=100, unique=True, default='0')
     status = models.CharField(
         max_length=20,
         choices=JobStatus.choices,
