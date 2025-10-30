@@ -1,9 +1,10 @@
 import pytest
+from django.contrib.auth.models import User
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APIClient
 from organization_management.apps.divisions.models import Division
-from organization_management.apps.auth.models import User
+
 
 @pytest.mark.django_db
 class TestDivisionViewSetAPI:

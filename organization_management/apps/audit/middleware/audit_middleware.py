@@ -1,5 +1,5 @@
 import json
-from .models import AuditEntry
+from organization_management.apps.audit.models import AuditEntry
 
 class AuditMiddleware:
     def __init__(self, get_response):

@@ -1,17 +1,18 @@
 # Django
-Django==5.0
-djangorestframework==3.14.0
+Django
+djangorestframework
+djangorestframework-simplejwt
 psycopg2-binary
 
 # Celery
-celery==5.3.6
-redis==5.0.1
-django-celery-results==2.5.1
-django-celery-beat==2.6.0
+celery
+redis
+django-celery-results
+django-celery-beat
 
 # Channels
-channels==4.0.0
-channels-redis==4.2.0
+channels
+channels-redis
 daphne
 
 # Reporting

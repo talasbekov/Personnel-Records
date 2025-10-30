@@ -4,13 +4,13 @@ from organization_management.apps.employees.application.services import Employee
 from organization_management.apps.divisions.models import Division
 from organization_management.apps.dictionaries.models import Position
 from organization_management.apps.employees.models import Employee
-from organization_management.apps.auth.models import User
-UserRole = User.RoleType
+
+
 
 class EmployeeApplicationServiceTest(TestCase):
     def setUp(self):
         self.service = EmployeeApplicationService()
-        self.user = get_user_model().objects.create_user(username='testuser', role=UserRole.ROLE_4)
+        self.user = get_user_model().objects.create_user(username='testuser')
         self.division = Division.objects.create(name='Test Division', division_type='DEPARTMENT')
         self.position = Position.objects.create(name='Test Position', level=1)
         self.employee = Employee.objects.create(

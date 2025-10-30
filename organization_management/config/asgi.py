@@ -14,6 +14,7 @@ from channels.routing import ProtocolTypeRouter, URLRouter
 from channels.auth import AuthMiddlewareStack
 from organization_management.apps.notifications import routing
 
+# Use SQLite settings by default for local development
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "organization_management.config.settings.production")
 
 application = ProtocolTypeRouter(

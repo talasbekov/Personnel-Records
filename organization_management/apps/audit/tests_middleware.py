@@ -1,18 +1,16 @@
-from django.test import TestCase
+from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
-
-from organization_management.apps.audit.models import AuditLog
-from organization_management.apps.divisions.models import Division, DivisionType
-from organization_management.apps.auth.models import User, UserRole, UserProfile
+from organization_management.apps.audit.domain.models import AuditLog
+from organization_management.apps.divisions.models import Division
 
 
 class AuditMiddlewareTest(APITestCase):
 
     def setUp(self):
         self.user = User.objects.create_user(username='testuser', password='testpassword')
-        UserProfile.objects.create(user=self.user, role=UserRole.ROLE_4)  # Admin role
+        # UserProfile.objects.create(user=self.user, role=UserRole.ROLE_4)  # Admin role
         self.client.force_authenticate(user=self.user)
-        self.division = Division.objects.create(name='Test Division', division_type=DivisionType.DEPARTMENT)
+        self.division = Division.objects.create(name='Test Division', division_type=Division.DivisionType.DEPARTMENT)
 
     def test_create_action_is_logged(self):
         url = '/api/divisions/'

@@ -9,6 +9,7 @@ as any production WSGI server such as Gunicorn.
 import os
 from django.core.wsgi import get_wsgi_application
 
+# Use SQLite settings by default for local development
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", "organization_management.config.settings.production")
 
 application = get_wsgi_application()

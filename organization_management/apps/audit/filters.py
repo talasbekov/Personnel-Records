@@ -6,7 +6,7 @@ user, action type, content type, object id and timestamp range.
 """
 
 import django_filters
-from .models import AuditLog
+from .domain.models import AuditLog
 
 
 class AuditLogFilter(django_filters.FilterSet):

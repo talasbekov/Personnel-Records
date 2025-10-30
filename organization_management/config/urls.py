@@ -1,16 +1,30 @@
+from django.conf import settings
+from django.conf.urls.static import static
 from django.contrib import admin
 from django.urls import path, include
+from django.views.decorators.cache import cache_page
+from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from drf_spectacular.views import SpectacularAPIView, SpectacularRedocView, SpectacularSwaggerView
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    # API Schema:
-    path('api/schema/', SpectacularAPIView.as_view(), name='schema'),
-    # Optional UI:
+
+    # JWT Authentication
+    path("api/token/", TokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
+
+    # API Documentation (короткие URL)
+    path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='docs'),
+    path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc-short'),
+
+    # API Schema (cached to avoid heavy regen on each request):
+    path('api/schema/', cache_page(60 * 60)(SpectacularAPIView.as_view()), name='schema'),
+
+    # Optional UI (длинные URL для обратной совместимости):
     path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
     path('api/schema/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+
     # API Endpoints:
-    path("api/auth/", include("organization_management.apps.auth.api.urls")),
     path("api/divisions/", include("organization_management.apps.divisions.api.urls")),
     path("api/employees/", include("organization_management.apps.employees.api.urls")),
     path("api/statuses/", include("organization_management.apps.statuses.api.urls")),
@@ -21,3 +35,6 @@ urlpatterns = [
     path("api/dictionaries/", include("organization_management.apps.dictionaries.api.urls")),
     path("api/staffing/", include("organization_management.apps.staffing.urls")),
 ]
+
+if settings.DEBUG:
+    urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)

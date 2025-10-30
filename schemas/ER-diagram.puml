@@ -1,0 +1,290 @@
+@startuml
+' ER диаграмма текущей БД (по коду на сейчас)
+hide circle
+skinparam linetype ortho
+skinparam packageStyle rectangle
+
+entity "Division" as div {
+*id: int
+name: string
+code: string <<unique>>
+division_type: enum('organization','department','directorate','division')
+parent_id: int <<FK Division.id>>
+is_active: bool
+created_at: datetime
+updated_at: datetime
+}
+div ||--o{ div : "иерархия (parent)"
+
+entity "User" as usr {
+*id: int
+username: string
+
+division_id: int? <<FK Division.id>>
+is_seconded: bool
+}
+div |o--o{ usr : "пользователи"
+
+entity "Position" as pos {
+*id: int
+name: string
+level: smallint
+description: text
+is_active: bool
+created_at: datetime
+updated_at: datetime
+}
+
+entity "Employee" as emp {
+*id: int
+personnel_number: string <<unique>>
+last_name: string
+first_name: string
+middle_name: string?
+birth_date: date
+gender: enum('M','F')
+photo: image?
+division_id: int <<FK Division.id>>
+position_id: int <<FK Position.id>>
+hire_date: date
+dismissal_date: date?
+employment_status: enum('working','fired')
+work_phone: string?
+work_email: string?
+personal_phone: string?
+personal_email: string?
+rank: string?
+education: text?
+specialty: string?
+notes: text?
+created_at: datetime
+updated_at: datetime
+}
+div ||--o{ emp : "сотрудники"
+pos ||--o{ emp : "должности"
+
+entity "EmployeeTransferHistory" as etransf {
+*id: int
+employee_id: int <<FK Employee.id>>
+from_division_id: int? <<FK Division.id>>
+to_division_id: int? <<FK Division.id>>
+from_position_id: int? <<FK Position.id>>
+to_position_id: int? <<FK Position.id>>
+transfer_date: date
+reason: string
+is_temporary: bool
+end_date: date?
+created_at: datetime
+}
+emp ||--o{ etransf
+div |o--o{ etransf : "from"
+div |o--o{ etransf : "to"
+pos |o--o{ etransf : "from"
+pos |o--o{ etransf : "to"
+
+entity "Staffing" as stf {
+*id: int
+division_id: int <<FK Division.id>>
+position_id: int <<FK Position.id>>
+quantity: int
+occupied: int
+}
+div ||--o{ stf : "штатка"
+pos ||--o{ stf : "штатка"
+
+entity "StaffUnit" as sunit {
+*id: int
+division_id: int <<FK Division.id>>
+position_id: int <<FK Position.id>>
+index: int
+-- unique(div, pos, index)
+}
+div ||--o{ sunit : "слоты"
+pos ||--o{ sunit : "слоты"
+
+entity "EmployeeAssignment" as assign {
+*id: int
+employee_id: int <<FK Employee.id>>
+staff_unit_id: int <<FK StaffUnit.id>> ' OneToOne (слот занят 1 сотрудником)
+assignment_type: enum('base','za_schet')
+reason: string
+created_by_id: int? <<FK User.id>>
+created_at: datetime
+-- unique(employee_id) ' один активный слот на сотрудника
+}
+emp ||--|| assign
+sunit ||--|| assign
+usr |o--o{ assign : "кто назначил"
+
+entity "Vacancy" as vac {
+*id: int
+staffing_id: int <<FK Staffing.id>>
+status: enum('open','closed')
+requirements: text
+responsibilities: text
+created_at: datetime
+updated_at: datetime
+}
+stf ||--o{ vac : "вакансии"
+
+entity "EmployeeStatus" as estatus {
+*id: int
+employee_id: int <<FK Employee.id>>
+status_type: enum('in_service','vacation','sick_leave','business_trip','training','other_absence','seconded_from','seconded_to')
+start_date: date
+end_date: date?
+comment: text
+related_division_id: int? <<FK Division.id>>
+location: string?
+created_by_id: int? <<FK User.id>>
+created_at: datetime
+updated_at: datetime
+}
+emp ||--o{ estatus
+div |o--o{ estatus : "related"
+usr |o--o{ estatus : "кто установил"
+
+entity "SecondmentRequest" as sreq {
+*id: int
+employee_id: int <<FK Employee.id>>
+from_division_id: int <<FK Division.id>>
+to_division_id: int <<FK Division.id>>
+start_date: date
+end_date: date
+reason: text
+status: enum('pending','approved','rejected','cancelled')
+requested_by_id: int? <<FK User.id>>
+approved_by_id: int? <<FK User.id>>
+approved_at: datetime?
+rejection_reason: text?
+created_at: datetime
+updated_at: datetime
+}
+emp ||--o{ sreq
+div |o--o{ sreq : "from"
+div |o--o{ sreq : "to"
+usr |o--o{ sreq : "requested_by"
+usr |o--o{ sreq : "approved_by"
+
+entity "Report" as rpt {
+*id: int
+report_type: enum('personnel_roster','division_report','staffing_table','status_summary')
+report_format: enum('docx','xlsx','pdf')
+division_id: int? <<FK Division.id>>
+date_from: date?
+date_to: date?
+filters: json
+job_id: string <<unique>>
+status: enum('pending','processing','completed','failed')
+file: file?
+error_message: text?
+created_by_id: int? <<FK User.id>>
+created_at: datetime
+completed_at: datetime?
+}
+div |o--o{ rpt
+usr |o--o{ rpt
+
+entity "Notification" as notif {
+*id: int
+recipient_id: int <<FK User.id>>
+notification_type: enum('status_changed','secondment_request','secondment_approved','report_ready','employee_hired')
+title: string
+message: text
+link: string?
+is_read: bool
+created_at: datetime
+}
+usr ||--o{ notif : "уведомления"
+
+entity "AuditEntry" as audit {
+*id: int
+user_id: int? <<FK User.id>>
+action_type: enum('create','update','delete','view','login','logout')
+content_type: string
+object_id: string
+object_repr: string
+changes: json
+ip_address: inet?
+user_agent: string?
+timestamp: datetime
+}
+usr |o--o{ audit
+
+package "Dictionaries" {
+entity "DismissalReason" as dreason {
+*id: int
+--
+name: string <<unique>>
+description: text?
+is_active: bool
+created_at: datetime
+updated_at: datetime
+}
+entity "TransferReason" as treason {
+*id: int
+--
+name: string <<unique>>
+description: text?
+is_active: bool
+created_at: datetime
+updated_at: datetime
+}
+entity "VacancyReason" as vreason {
+*id: int
+--
+name: string <<unique>>
+description: text?
+is_active: bool
+created_at: datetime
+updated_at: datetime
+}
+entity "EducationType" as etype {
+*id: int
+--
+name: string <<unique>>
+description: text?
+is_active: bool
+created_at: datetime
+updated_at: datetime
+}
+entity "DocumentType" as dtype {
+*id: int
+--
+name: string <<unique>>
+description: text?
+is_active: bool
+created_at: datetime
+updated_at: datetime
+}
+entity "SystemSetting" as ssetting {
+*id: int
+--
+key: string
+value: text
+created_at: datetime
+updated_at: datetime
+}
+}
+
+' Примечания по ограничениям
+note right of div
+
+unique(code)
+unique(parent_id, name)
+end note
+note right of sunit
+
+unique(division_id, position_id, index)
+не связан FK со Staffing, но совпадает пара (division, position)
+end note
+note right of assign
+
+OneToOne со StaffUnit (слот может быть занят только одним сотрудником)
+unique(employee_id) — 1 активное назначение на сотрудника
+end note
+note right of rpt
+
+job_id уникален
+end note
+@enduml

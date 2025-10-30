@@ -1,34 +1,9 @@
 from django.db import models
 from django.utils.translation import gettext_lazy as _
-
+from mptt.models import MPTTModel, TreeForeignKey
 from organization_management.apps.divisions.models import Division
 from organization_management.apps.dictionaries.models import Position
-
-
-class Staffing(models.Model):
-    """Штатное расписание"""
-    division = models.ForeignKey(
-        Division,
-        on_delete=models.CASCADE,
-        related_name='staffing',
-        verbose_name=_('Подразделение')
-    )
-    position = models.ForeignKey(
-        Position,
-        on_delete=models.CASCADE,
-        related_name='staffing',
-        verbose_name=_('Должность')
-    )
-    quantity = models.PositiveIntegerField(verbose_name=_('Количество штатных единиц'))
-    occupied = models.PositiveIntegerField(default=0, verbose_name=_('Занято'))
-
-    class Meta:
-        verbose_name = _('Штатное расписание')
-        verbose_name_plural = _('Штатные расписания')
-        unique_together = ('division', 'position')
-
-    def __str__(self):
-        return f'{self.division} - {self.position}'
+from organization_management.apps.employees.models import Employee
 
 
 class Vacancy(models.Model):
@@ -37,12 +12,6 @@ class Vacancy(models.Model):
         OPEN = 'open', _('Открыта')
         CLOSED = 'closed', _('Закрыта')
 
-    staffing = models.ForeignKey(
-        Staffing,
-        on_delete=models.CASCADE,
-        related_name='vacancies',
-        verbose_name=_('Штатное расписание')
-    )
     status = models.CharField(
         max_length=10,
         choices=VacancyStatus.choices,
@@ -55,8 +24,67 @@ class Vacancy(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
+        db_table = 'vacancies'
         verbose_name = _('Вакансия')
         verbose_name_plural = _('Вакансии')
 
     def __str__(self):
-        return f'{self.staffing.position} ({self.get_status_display()})'
+        return f'{self.id} {self.status} ({self.requirements}) ({self.responsibilities})'
+
+
+class StaffUnit(MPTTModel):
+    """Конкретная штатная единица (слот) для пары division+position."""
+
+    division = models.ForeignKey(
+        Division,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='staff_units',
+        verbose_name=_('Подразделение'),
+    )
+    position = models.ForeignKey(
+        Position,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='staff_units',
+        verbose_name=_('Должность'),
+    )
+    employee = models.OneToOneField(
+        Employee,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='staff_unit',
+        verbose_name=_('Сотрудник'),
+    )
+    vacancy = models.OneToOneField(
+        Vacancy,
+        on_delete=models.SET_NULL,
+        null=True,
+        related_name='staff_unit',
+        verbose_name=_('Вакансия'),
+    )
+    parent = TreeForeignKey(
+        'self',
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name='children'
+    )
+    index = models.PositiveIntegerField(verbose_name=_('Номер слота'))
+
+    class MPTTMeta:
+        order_insertion_by = ['division', 'position']
+
+    class Meta:
+        db_table = 'staff_units'
+        verbose_name = _('Штатная единица')
+        verbose_name_plural = _('Штатные единицы')
+        unique_together = ('division', 'position', 'index')
+        constraints = [
+            models.UniqueConstraint(fields=['parent', 'name'], name='uq_staff_unit_id_per_parent')
+        ]
+
+    def __str__(self):
+        emp = f"{self.employee}" if self.employee else "-"
+        return f"{self.id} {self.division} - {self.position} - {emp.last_name} {emp.first_name} #{self.index}"
+

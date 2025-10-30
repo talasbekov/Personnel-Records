@@ -2,7 +2,7 @@ import pytest
 from channels.testing import WebsocketCommunicator
 from django.test import override_settings
 from django.contrib.auth.models import User
-from hr_system.asgi import application
+from organization_management.config.asgi import application
 from channels.db import database_sync_to_async
 
 @pytest.mark.django_db

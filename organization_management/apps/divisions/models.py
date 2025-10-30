@@ -1,5 +1,6 @@
 from django.db import models
 from mptt.models import MPTTModel, TreeForeignKey
+from django.utils import timezone
 
 class Division(MPTTModel):
     """Модель подразделения (поддерживает иерархию)"""
@@ -22,6 +23,7 @@ class Division(MPTTModel):
     )
     is_active = models.BooleanField(default=True)
     order = models.IntegerField(default=0)
+    archived_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -33,3 +35,12 @@ class Division(MPTTModel):
         db_table = 'divisions'
         verbose_name = 'Подразделение'
         verbose_name_plural = 'Подразделения'
+        constraints = [
+            models.UniqueConstraint(fields=['parent', 'name'], name='uq_division_name_per_parent')
+        ]
+        permissions = [
+            ("can_view_subordinate_departments", "Может видеть на уровне Департамента"),
+        ]
+
+    def __str__(self):
+        return self.name

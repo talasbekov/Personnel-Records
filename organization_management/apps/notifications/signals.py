@@ -13,122 +13,104 @@ from django.dispatch import receiver
 from django.contrib.auth.models import User
 from organization_management.apps.secondments.models import SecondmentRequest
 from organization_management.apps.statuses.models import EmployeeStatusLog
-from organization_management.apps.employees.models import Vacancy, Employee
-from .models import Notification, NotificationType
+from organization_management.apps.employees.models import Employee
+from .models import Notification
 
-# Attempt to import Channels components for real-time notifications.  If
-# Channels is not installed or misconfigured, real-time delivery will
-# gracefully degrade to storing notifications in the database only.
+# Attempt Channels import
 try:
     from channels.layers import get_channel_layer
     from asgiref.sync import async_to_sync
-
     _has_channels = True
 except Exception:
     _has_channels = False
 
 
+# ✅ Сигнал только на SecondmentRequest
 @receiver(post_save, sender=SecondmentRequest, dispatch_uid="create_secondment_notification")
 def create_secondment_notification(sender, instance, created, **kwargs):
-    """Notify a recipient when a secondment request is created."""
     if created:
         recipient = instance.approved_by or User.objects.filter(is_superuser=True).first()
-        if recipient:
-            Notification.objects.create(
-                recipient=recipient,
-                notification_type=NotificationType.SECONDMENT,
-                title=f"New Secondment Request for {instance.employee.full_name}",
-                message=(
-                    f"A new secondment from {instance.from_division.name} to "
-                    f"{instance.to_division.name} has been requested for {instance.employee.full_name}."
-                ),
-                related_object_id=instance.id,
-                related_model="SecondmentRequest",
-                payload={"secondment_request_id": instance.id, "employee_id": instance.employee.id},
-            )
+        if not recipient:
+            return
+
+        Notification.objects.create(
+            recipient=recipient,
+            notification_type=Notification.NotificationType.SECONDMENT_REQUEST,
+            title=f"New Secondment Request for {instance.employee.full_name}",
+            message=(
+                f"A new secondment from {instance.from_division.name} to "
+                f"{instance.to_division.name} has been requested for {instance.employee.full_name}."
+            ),
+            related_object_id=instance.id,
+            related_model="SecondmentRequest",
+            payload={"secondment_request_id": instance.id, "employee_id": instance.employee.id},
+        )
 
 
+# ✅ Сигнал только на EmployeeStatusLog
 @receiver(post_save, sender=EmployeeStatusLog, dispatch_uid="create_status_update_notification")
 def create_status_update_notification(sender, instance, created, **kwargs):
-    """Notify a user when their status has been updated."""
-    if created and instance.employee.user:
-        Notification.objects.create(
-            recipient=instance.employee.user,
-            notification_type=NotificationType.STATUS_UPDATE,
-            title=f"Your status has been updated to {instance.get_status_display()}",
-            message=(
-                f'Your status has been updated to "{instance.get_status_display()}" '
-                f"from {instance.date_from}."
-            ),
-            related_object_id=instance.id,
-            related_model="EmployeeStatusLog",
-            payload={"status_log_id": instance.id, "new_status": instance.status},
-        )
-        # If real-time channels are configured, send an immediate update
-        if _has_channels:
-            try:
-                channel_layer = get_channel_layer()
-                async_to_sync(channel_layer.group_send)(
-                    f"user_{instance.employee.user.id}_notifications",
-                    {
-                        "type": "notification.message",
-                        "message": {
-                            "type": "status_update",
-                            "employee_id": instance.employee.id,
-                            "new_status": instance.status,
-                        },
+    if not created or not instance.employee or not instance.employee.user:
+        return
+
+    Notification.objects.create(
+        recipient=instance.employee.user,
+        notification_type=Notification.NotificationType.STATUS_CHANGED,
+        title=f"Your status has been updated to {instance.get_status_display()}",
+        message=(
+            f'Your status has been updated to "{instance.get_status_display()}" '
+            f"from {instance.date_from}."
+        ),
+        related_object_id=instance.id,
+        related_model="EmployeeStatusLog",
+        payload={"status_log_id": instance.id, "new_status": instance.status},
+    )
+
+    if _has_channels:
+        try:
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                f"user_{instance.employee.user.id}_notifications",
+                {
+                    "type": "notification.message",
+                    "message": {
+                        "type": "status_update",
+                        "employee_id": instance.employee.id,
+                        "new_status": instance.status,
                     },
-                )
-            except Exception:
-                # Do not propagate channel errors
-                pass
+                },
+            )
+        except Exception:
+            pass
 
 
-@receiver(post_save, sender=Vacancy, dispatch_uid="create_vacancy_notification")
-def create_vacancy_notification(sender, instance, created, **kwargs):
-    """Notify the creator of a vacancy when it is created."""
-    if created and instance.created_by:
-        Notification.objects.create(
-            recipient=instance.created_by,
-            notification_type=NotificationType.VACANCY_CREATED,
-            title=f"New Vacancy Created: {instance.title}",
-            message=(
-                f'A new vacancy "{instance.title}" has been created in '
-                f"{instance.staffing_unit.division.name}."
-            ),
-            related_object_id=instance.id,
-            related_model="Vacancy",
-            payload={
-                "vacancy_id": instance.id,
-                "division_id": instance.staffing_unit.division.id,
-            },
-        )
-
-
+# ✅ Сигнал только на Employee
 @receiver(post_save, sender=Employee, dispatch_uid="create_employee_update_notification")
 def create_employee_update_notification(sender, instance, created, **kwargs):
-    """Notify the employee when their profile is created or updated."""
+    if not instance.user:
+        return
+
     action = "created" if created else "updated"
-    if instance.user:
-        Notification.objects.create(
-            recipient=instance.user,
-            notification_type=NotificationType.TRANSFER,
-            title=f"Your employee profile has been {action}",
-            message=f"Your profile has been {action}.",
-            related_object_id=instance.id,
-            related_model="Employee",
-            payload={"employee_id": instance.id},
-        )
+
+    Notification.objects.create(
+        recipient=instance.user,
+        notification_type=Notification.NotificationType.STATUS_CHANGED,
+        title=f"Your employee profile has been {action}",
+        message=f"Your profile has been {action}.",
+        related_object_id=instance.id,
+        related_model="Employee",
+        payload={"employee_id": instance.id},
+    )
 
 
+# ✅ Сигнал только на Employee
 @receiver(post_delete, sender=Employee, dispatch_uid="create_employee_delete_notification")
 def create_employee_delete_notification(sender, instance, **kwargs):
-    """Notify superusers when an employee is deleted."""
     recipients = User.objects.filter(is_superuser=True)
     for recipient in recipients:
         Notification.objects.create(
             recipient=recipient,
-            notification_type=NotificationType.TRANSFER,
+            notification_type=Notification.NotificationType.STATUS_CHANGED,
             title=f"Employee Deleted: {instance.full_name}",
             message=f"The employee profile for {instance.full_name} has been deleted.",
             related_object_id=instance.id,

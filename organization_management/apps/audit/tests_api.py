@@ -3,9 +3,9 @@ from rest_framework.test import APITestCase
 from django.utils import timezone
 import datetime
 
-from organization_management.apps.audit.models import AuditLog
+from organization_management.apps.audit.domain.models import AuditLog
 from organization_management.apps.divisions.models import Division, DivisionType
-from organization_management.apps.auth.models import User, UserRole, UserProfile
+
 
 
 class AuditLogAPITest(APITestCase):

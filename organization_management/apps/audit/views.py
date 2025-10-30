@@ -9,7 +9,7 @@ filters.
 from rest_framework import viewsets
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters
-from .models import AuditLog
+from .domain.models import AuditLog
 from .serializers import AuditLogSerializer
 from .filters import AuditLogFilter
 

@@ -2,13 +2,11 @@ from rest_framework.test import APITestCase
 from django.contrib.auth import get_user_model
 from organization_management.apps.divisions.models import Division
 DivisionType = Division.DivisionType
-from organization_management.apps.auth.models import User
-from organization_management.apps.auth.models import User
-UserRole = User.RoleType
+
 
 class DivisionViewSetTest(APITestCase):
     def setUp(self):
-        self.user = get_user_model().objects.create_user(username='testuser', is_staff=True, role=UserRole.ROLE_4)
+        self.user = get_user_model().objects.create_user(username='testuser', is_staff=True)
         self.client.force_authenticate(user=self.user)
         self.company = Division.objects.create(name='Test Company', division_type='COMPANY', code='COMPANY')
         self.division = Division.objects.create(name='Test Division', division_type='DEPARTMENT', parent_division=self.company, code='DEPT')

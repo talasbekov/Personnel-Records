@@ -1,5 +1,5 @@
 """
-Celery application configuration for the hr_system project.
+Celery application configuration for the organization_management project.
 
 This module sets up the Celery application and instructs it to read
 configuration from the Django settings module using the ``CELERY_`` prefix.
@@ -14,9 +14,9 @@ additional details.
 import os
 from celery import Celery
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "hr_system.settings")
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "organization_management.config.settings.production")
 
-app = Celery("hr_system")
+app = Celery("organization_management")
 
 # Using a string here means the worker doesn't need to serialize
 # the configuration object to child processes.

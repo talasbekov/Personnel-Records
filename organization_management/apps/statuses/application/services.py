@@ -1,4 +1,4 @@
-from organization_management.apps.statuses.models import EmployeeStatusLog
+from organization_management.apps.statuses.models import EmployeeStatus
 from organization_management.apps.employees.models import Employee
 from organization_management.apps.statuses.domain.repositories import StatusRepository
 from organization_management.apps.statuses.infrastructure.repositories import StatusRepositoryImpl
@@ -9,7 +9,7 @@ class StatusApplicationService:
 
     def create_status(self, user, employee_id, status, date_from, date_to=None, comment=None):
         employee = Employee.objects.get(id=employee_id)
-        status_log = EmployeeStatusLog(
+        status_log = EmployeeStatus(
             employee=employee,
             status=status,
             date_from=date_from,

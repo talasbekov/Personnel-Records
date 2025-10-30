@@ -1,7 +1,7 @@
-from django.test import TestCase
 from rest_framework.test import APITestCase
-from organization_management.apps.auth.models import User, UserRole, UserProfile
-from .models import Notification, NotificationType
+from django.contrib.auth.models import User
+
+from organization_management.apps.notifications.models import Notification
 
 
 class NotificationAPITest(APITestCase):
@@ -9,19 +9,19 @@ class NotificationAPITest(APITestCase):
     def setUp(self):
         self.user1 = User.objects.create_user(username='testuser1', password='password')
         self.user2 = User.objects.create_user(username='testuser2', password='password')
-        UserProfile.objects.create(user=self.user1, role=UserRole.ROLE_4)
+        # UserProfile.objects.create(user=self.user1, role=UserRole.ROLE_4)
 
         # Notification for user1
         self.notification1 = Notification.objects.create(
             recipient=self.user1,
-            notification_type=NotificationType.SECONDMENT,
+            notification_type=Notification.NotificationType.SECONDMENT_REQUEST,
             title='Notification 1',
             message='This is for user 1'
         )
         # Notification for user2
         Notification.objects.create(
             recipient=self.user2,
-            notification_type=NotificationType.STATUS_UPDATE,
+            notification_type=Notification.NotificationType.STATUS_CHANGED,
             title='Notification 2',
             message='This is for user 2'
         )

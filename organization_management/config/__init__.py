@@ -1,13 +1,5 @@
 """
-Initialisation for the hr_system Django project.
-
-Importing ``celery_app`` here allows Celery to discover the task
-application when Django starts.  Without this import, Celery would not
-automatically pick up the tasks defined in ``personnel/tasks.py``.
-"""
-
-"""
-Initialisation for the hr_system Django project.
+Initialisation for the organization_management Django project.
 
 This module conditionally imports the Celery application so that tasks
 are auto‑discovered when Celery workers are running.  The import is

@@ -9,15 +9,6 @@ class Position(models.Model):
         verbose_name=_("Уровень"),
         help_text=_("Чем меньше число, тем выше должность")
     )
-    description = models.TextField(
-        blank=True,
-        verbose_name=_("Описание должности")
-    )
-    is_active = models.BooleanField(
-        default=True,
-        verbose_name=_("Активна"),
-        help_text=_("Неактивные должности не отображаются при выборе")
-    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -27,7 +18,6 @@ class Position(models.Model):
         verbose_name_plural = _("Должности")
         indexes = [
             models.Index(fields=["level"]),
-            models.Index(fields=["is_active"]),
         ]
 
     def __str__(self):
@@ -151,3 +141,25 @@ class SystemSetting(models.Model):
 
     def __str__(self):
         return self.key
+
+
+class Rank(models.Model):
+    """Справочник: Звание согласно ТЗ"""
+    name = models.CharField(max_length=50, unique=True, verbose_name=_("Звание"))
+    level = models.SmallIntegerField(
+        verbose_name=_("Уровень"),
+        help_text=_("Чем меньше число, тем выше звание")
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["level", "name"]
+        verbose_name = _("Звание")
+        verbose_name_plural = _("Звания")
+        indexes = [
+            models.Index(fields=["level"]),
+        ]
+
+    def __str__(self):
+        return f"{self.name} (Уровень: {self.level})"

@@ -2,3 +2,4 @@
 
 # WSGI Server
 gunicorn
+drf-spectacular

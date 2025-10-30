@@ -7,7 +7,7 @@ and represented by the user's string representation.
 """
 
 from rest_framework import serializers
-from .models import AuditLog
+from .domain.models import AuditLog
 
 
 class AuditLogSerializer(serializers.ModelSerializer):

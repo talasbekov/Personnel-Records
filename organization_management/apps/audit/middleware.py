@@ -1,7 +1,7 @@
 import json
 from django.contrib.contenttypes.models import ContentType
 from django.forms.models import model_to_dict
-from .models import AuditLog
+from .domain.models import AuditLog
 
 
 class AuditMiddleware:

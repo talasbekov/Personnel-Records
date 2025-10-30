@@ -8,6 +8,9 @@ done
 
 >&2 echo "Postgres is up - executing command"
 
+# Set Django settings to production
+export DJANGO_SETTINGS_MODULE=organization_management.config.settings.production
+
 # Apply database migrations
 python manage.py migrate
 
