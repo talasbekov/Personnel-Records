@@ -7,7 +7,7 @@ class DivisionSerializer(serializers.ModelSerializer):
     Сериализатор для модели Division.
     Использует рекурсивное поле для отображения дочерних подразделений.
     """
-    children = serializers.ListField(read_only=True, source='get_children')
+    children = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Division

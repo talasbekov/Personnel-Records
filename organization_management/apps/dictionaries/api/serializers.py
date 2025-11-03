@@ -14,7 +14,7 @@ from organization_management.apps.dictionaries.models import (
 class PositionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Position
-        fields = '__all__'
+        fields = ["id", "name", "level"]
 
 class RankSerializer(serializers.ModelSerializer):
     class Meta:
