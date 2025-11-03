@@ -2,6 +2,7 @@ from rest_framework import viewsets, permissions
 
 from organization_management.apps.dictionaries.models import (
     Position,
+    Rank,
     StatusType,
     DismissalReason,
     TransferReason,
@@ -12,6 +13,7 @@ from organization_management.apps.dictionaries.models import (
 )
 from .serializers import (
     PositionSerializer,
+    RankSerializer,
     StatusTypeSerializer,
     DismissalReasonSerializer,
     TransferReasonSerializer,
@@ -24,6 +26,17 @@ from .serializers import (
 class PositionViewSet(viewsets.ModelViewSet):
     queryset = Position.objects.all()
     serializer_class = PositionSerializer
+
+    def get_permissions(self):
+        if self.request.method in permissions.SAFE_METHODS:
+            self.permission_classes = [permissions.IsAuthenticated]
+        else:
+            self.permission_classes = [permissions.IsAuthenticated]
+        return super().get_permissions()
+
+class RankViewSet(viewsets.ModelViewSet):
+    queryset = Rank.objects.all()
+    serializer_class = RankSerializer
 
     def get_permissions(self):
         if self.request.method in permissions.SAFE_METHODS:

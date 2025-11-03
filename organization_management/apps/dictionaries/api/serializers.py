@@ -1,6 +1,7 @@
 from rest_framework import serializers
 from organization_management.apps.dictionaries.models import (
     Position,
+    Rank,
     StatusType,
     DismissalReason,
     TransferReason,
@@ -13,6 +14,11 @@ from organization_management.apps.dictionaries.models import (
 class PositionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Position
+        fields = '__all__'
+
+class RankSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Rank
         fields = '__all__'
 
 class StatusTypeSerializer(serializers.ModelSerializer):

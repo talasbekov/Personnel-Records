@@ -22,8 +22,8 @@ class Employee(models.Model):
     photo = models.ImageField(upload_to='employees/photos/', null=True, blank=True)
 
     # Служебная информация
-    rank = models.ForeignKey('dictionaries.Rank', on_delete=models.PROTECT, null=True)
-    user = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True)
+    rank = models.ForeignKey('dictionaries.Rank', on_delete=models.PROTECT, null=True, blank=True)
+    user = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True, blank=True)
     hire_date = models.DateField(default='1970-01-01')
     dismissal_date = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)

@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from .serializers import EmployeeSerializer
 from organization_management.apps.employees.models import Employee
 from organization_management.apps.divisions.models import Division
-from organization_management.apps.staffing.models import Staffing
+from organization_management.apps.staff_unit.models import StaffUnit
 from organization_management.apps.employees.models import EmployeeTransferHistory
 from django.db import transaction
 from organization_management.apps.statuses.models import EmployeeStatus
@@ -54,24 +54,14 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         return str(num).zfill(6)
 
     def _inc_staffing(self, division_id, position_id):
-        if not division_id or not position_id:
-            return
-        try:
-            st = Staffing.objects.get(division_id=division_id, position_id=position_id)
-            st.occupied = max(0, (st.occupied or 0)) + 1
-            st.save(update_fields=['occupied'])
-        except Staffing.DoesNotExist:
-            return
+        # StaffUnit теперь управляется через связь employee
+        # Логика назначения сотрудника на штатную единицу обрабатывается отдельно
+        pass
 
     def _dec_staffing(self, division_id, position_id):
-        if not division_id or not position_id:
-            return
-        try:
-            st = Staffing.objects.get(division_id=division_id, position_id=position_id)
-            st.occupied = max(0, (st.occupied or 0) - 1)
-            st.save(update_fields=['occupied'])
-        except Staffing.DoesNotExist:
-            return
+        # StaffUnit теперь управляется через связь employee
+        # Логика освобождения штатной единицы обрабатывается отдельно
+        pass
 
     def perform_create(self, serializer):
         data = serializer.validated_data
@@ -149,7 +139,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                 is_temporary=is_temporary,
                 end_date=end_date,
             )
-            # staffing counters
+            # staff_unit counters
             if division_id and position_id and (old_div != division_id or old_pos != position_id):
                 self._dec_staffing(old_div, old_pos)
                 self._inc_staffing(division_id, position_id)

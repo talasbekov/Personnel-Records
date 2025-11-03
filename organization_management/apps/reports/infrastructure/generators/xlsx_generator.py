@@ -45,7 +45,7 @@ class XLSXGenerator:
             ws.append(
                 [
                     row["division_name"],
-                    row["staffing"],
+                    row["staff_unit"],
                     row["in_service"],
                     row["vacation"],
                     row["sick_leave"],

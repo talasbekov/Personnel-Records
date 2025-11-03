@@ -6,7 +6,7 @@ from django.utils import timezone
 from organization_management.apps.divisions.models import Division
 from organization_management.apps.employees.models import Employee
 from organization_management.apps.statuses.models import EmployeeStatus
-from organization_management.apps.staffing.models import Staffing
+from organization_management.apps.staff_unit.models import StaffUnit
 
 
 class DataAggregator:
@@ -14,7 +14,7 @@ class DataAggregator:
     Сборщик данных для отчетов по расходу на дату.
 
     Рассчитывает по каждому подразделению:
-    - Штатная численность (sum Staffing.quantity)
+    - Штатная численность (count StaffUnit)
     - В строю, Отпуск, Больничный, Командировка, Учёба, Прочие отсутствия
     - Прикомандировано (входящие) и Откомандировано (исходящие)
     - Итого наличествует = В строю + Прикомандировано
@@ -75,12 +75,12 @@ class DataAggregator:
             for row in employees.values("division_id").annotate(total=Count("id"))
         }
 
-        # Штатная численность (по конкретному подразделению, без поддерева)
+        # Штатная численность (количество штатных единиц по подразделению)
         staffing_map = {
             row["division_id"]: row["qty"]
-            for row in Staffing.objects.filter(division_id__in=division_ids)
+            for row in StaffUnit.objects.filter(division_id__in=division_ids)
             .values("division_id")
-            .annotate(qty=Sum("quantity"))
+            .annotate(qty=Count("id"))
         }
 
         rows = []
@@ -114,7 +114,7 @@ class DataAggregator:
                 {
                     "division_id": did,
                     "division_name": d["name"],
-                    "staffing": staffing_qty,
+                    "staff_unit": staffing_qty,
                     "in_service": in_service,
                     "vacation": vacation_map.get(did, 0),
                     "sick_leave": sick_map.get(did, 0),

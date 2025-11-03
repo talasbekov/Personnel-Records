@@ -1,6 +1,6 @@
 from django.apps import AppConfig
 
 
-class StaffingConfig(AppConfig):
+class StaffUnitConfig(AppConfig):
     default_auto_field = "django.db.models.BigAutoField"
-    name = "organization_management.apps.staffing"
+    name = "organization_management.apps.staff_unit"

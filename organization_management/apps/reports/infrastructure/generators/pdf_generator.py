@@ -31,7 +31,7 @@ class PDFGenerator:
         for row in data.get("rows", []):
             table_data.append([
                 str(row["division_name"]),
-                str(row["staffing"]),
+                str(row["staff_unit"]),
                 str(row["in_service"]),
                 str(row["vacation"]),
                 str(row["sick_leave"]),

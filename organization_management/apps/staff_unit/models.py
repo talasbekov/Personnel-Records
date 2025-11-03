@@ -52,14 +52,14 @@ class StaffUnit(MPTTModel):
     employee = models.OneToOneField(
         Employee,
         on_delete=models.SET_NULL,
-        null=True,
+        null=True, blank=True,
         related_name='staff_unit',
         verbose_name=_('Сотрудник'),
     )
     vacancy = models.OneToOneField(
         Vacancy,
         on_delete=models.SET_NULL,
-        null=True,
+        null=True, blank=True,
         related_name='staff_unit',
         verbose_name=_('Вакансия'),
     )
@@ -80,11 +80,8 @@ class StaffUnit(MPTTModel):
         verbose_name = _('Штатная единица')
         verbose_name_plural = _('Штатные единицы')
         unique_together = ('division', 'position', 'index')
-        constraints = [
-            models.UniqueConstraint(fields=['parent', 'name'], name='uq_staff_unit_id_per_parent')
-        ]
 
     def __str__(self):
-        emp = f"{self.employee}" if self.employee else "-"
-        return f"{self.id} {self.division} - {self.position} - {emp.last_name} {emp.first_name} #{self.index}"
+        emp_name = f"{self.employee}" if self.employee else "Вакансия"
+        return f"{self.division} - {self.position} - {emp_name} #{self.index}"
 

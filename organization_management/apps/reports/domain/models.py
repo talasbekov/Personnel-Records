@@ -9,7 +9,7 @@ class Report(models.Model):
     class ReportType(models.TextChoices):
         PERSONNEL_ROSTER = 'personnel_roster', 'Расход личного состава'
         DIVISION_REPORT = 'division_report', 'Отчет по подразделению'
-        STAFFING_TABLE = 'staffing_table', 'Штатное расписание'
+        STAFFING_TABLE = 'staff_units', 'Штатное расписание'
         STATUS_SUMMARY = 'status_summary', 'Сводка по статусам'
 
     class ReportFormat(models.TextChoices):

@@ -2,6 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from organization_management.apps.dictionaries.api.views import (
     PositionViewSet,
+    RankViewSet,
     StatusTypeViewSet,
     DismissalReasonViewSet,
     TransferReasonViewSet,
@@ -13,6 +14,7 @@ from organization_management.apps.dictionaries.api.views import (
 
 router = DefaultRouter()
 router.register(r"positions", PositionViewSet)
+router.register(r"ranks", RankViewSet)
 router.register(r"status-types", StatusTypeViewSet)
 router.register(r"dismissal-reasons", DismissalReasonViewSet)
 router.register(r"transfer-reasons", TransferReasonViewSet)

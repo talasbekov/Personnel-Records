@@ -59,7 +59,7 @@ class DOCXGenerator:
         for i, row in enumerate(rows, start=1):
             cells = table.rows[i].cells
             cells[0].text = str(row["division_name"])  # type: ignore
-            cells[1].text = str(row["staffing"])  # type: ignore
+            cells[1].text = str(row["staff_unit"])  # type: ignore
             cells[2].text = str(row["in_service"])  # type: ignore
             cells[3].text = str(row["vacation"])  # type: ignore
             cells[4].text = str(row["sick_leave"])  # type: ignore
