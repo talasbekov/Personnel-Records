@@ -34,7 +34,7 @@ class VacancyViewSet(viewsets.ModelViewSet):
 
 
 class StaffUnitViewSet(viewsets.ModelViewSet):
-    queryset = StaffUnit.objects.all()
+    queryset = StaffUnit.objects.filter(parent_id__isnull=True)[:1]
     serializer_class = StaffUnitSerializer
 
     def get_permissions(self):

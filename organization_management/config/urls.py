@@ -25,15 +25,16 @@ urlpatterns = [
     path('api/schema/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 
     # API Endpoints:
-    path("api/divisions/", include("organization_management.apps.divisions.api.urls")),
-    path("api/employees/", include("organization_management.apps.employees.api.urls")),
+    path("api/staff_unit/", include("organization_management.apps.staff_unit.urls")),
+    # path("api/divisions/", include("organization_management.apps.divisions.api.urls")),
+    # path("api/employees/", include("organization_management.apps.employees.api.urls")),
     path("api/statuses/", include("organization_management.apps.statuses.api.urls")),
-    path("api/secondments/", include("organization_management.apps.secondments.api.urls")),
+    # path("api/secondments/", include("organization_management.apps.secondments.api.urls")),
     path("api/reports/", include("organization_management.apps.reports.api.urls")),
     path("api/notifications/", include("organization_management.apps.notifications.api.urls")),
-    path("api/audit/", include("organization_management.apps.audit.api.urls")),
-    path("api/dictionaries/", include("organization_management.apps.dictionaries.api.urls")),
-    path("api/staff_unit/", include("organization_management.apps.staff_unit.urls")),
+    # path("api/audit/", include("organization_management.apps.audit.api.urls")),
+    # path("api/dictionaries/", include("organization_management.apps.dictionaries.api.urls")),
+
 ]
 
 if settings.DEBUG:

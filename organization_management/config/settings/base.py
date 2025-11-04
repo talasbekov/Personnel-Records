@@ -152,7 +152,12 @@ SPECTACULAR_SETTINGS = {
     'TITLE': 'Personnel Records API',
     'DESCRIPTION': 'API для системы управления персоналом и штатным расписанием',
     'VERSION': '1.0.0',
-    'SERVE_PERMISSIONS': ['rest_framework.permissions.AllowAny'],  # Swagger доступен всем
+    'SERVE_PERMISSIONS': ['rest_framework.permissions.AllowAny'],
+    'SORT_OPERATIONS': False,
+    'SWAGGER_UI_SETTINGS': {
+            'operationsSorter': None,
+            'tagsSorter': None,
+        },
 }
 
 # Celery Configuration

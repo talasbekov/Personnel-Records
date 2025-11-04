@@ -34,16 +34,17 @@ class EmployeeSerializer(serializers.ModelSerializer):
 class StaffUnitSerializer(serializers.ModelSerializer):
     division = DivisionSerializer(read_only=True)
     position = DictionaryPositionSerializer(read_only=True)
-    employees = EmployeeSerializer(many=True, read_only=True)
+    employee = EmployeeSerializer(read_only=True)
     vacancies = VacancySerializer(many=True, read_only=True)
     children = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = StaffUnit
-        fields = ["id", "division", "position", "employees", "vacancies", "index", "parent_id", "children"]
+        fields = ["id", "division", "position", "employee", "vacancies", "index", "parent_id", "children"]
 
     def get_children(self, obj):
         """
         Рекурсивно сериализует дочерние подразделения.
         """
+
         return StaffUnitSerializer(obj.get_children(), many=True).data
