@@ -5,7 +5,7 @@ from datetime import date
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
+from rest_framework.parsers import MultiPartParser, FormParser
 
 from django.utils import timezone
 from django.core.exceptions import ValidationError
