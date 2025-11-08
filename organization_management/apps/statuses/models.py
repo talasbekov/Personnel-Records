@@ -2,21 +2,24 @@ from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.utils import timezone
-from datetime import timedelta
 
 
 class EmployeeStatus(models.Model):
     """Модель статуса сотрудника"""
 
     class StatusType(models.TextChoices):
-        IN_SERVICE = 'in_service', 'В строю'
-        VACATION = 'vacation', 'Отпуск'
-        SICK_LEAVE = 'sick_leave', 'Больничный'
-        BUSINESS_TRIP = 'business_trip', 'Командировка'
-        TRAINING = 'training', 'Учёба'
-        OTHER_ABSENCE = 'other_absence', 'Отсутствие по иным причинам'
-        SECONDED_FROM = 'seconded_from', 'Прикомандирован из'
-        SECONDED_TO = 'seconded_to', 'Откомандирован в'
+        IN_SERVICE      =   'in_service',       'В строю'
+        VACATION        =   'vacation',         'Отпуск'
+        LEAVE_BY_REPORT =   'leave_by_report',  'Отпуск по рапорту'
+        SICK_LEAVE      =   'sick_leave',       'Больничный'
+        BUSINESS_TRIP   =   'business_trip',    'Командировка'
+        TRAINING        =   'training',         'Учёба'
+        COMPETITION     =   'competition',      'На соревнованиях'
+        OTHER_ABSENCE   =   'other_absence',    'Отсутствие по иным причинам'
+        ON_DUTY         =   'on_duty',          'На дежурстве'
+        AFTER_DUTY      =   'after_duty',       'После дежурства'
+        SECONDED_FROM   =   'seconded_from',    'Прикомандирован из'
+        SECONDED_TO     =   'seconded_to',      'Откомандирован в'
 
     class StatusState(models.TextChoices):
         PLANNED = 'planned', 'Запланирован'
@@ -317,6 +320,9 @@ class EmployeeStatus(models.Model):
     @property
     def is_active(self):
         """Проверка, является ли статус активным на текущую дату"""
+        if not self.start_date:
+            return False
+
         today = timezone.now().date()
         return (
             self.state == self.StatusState.ACTIVE and

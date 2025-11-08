@@ -19,6 +19,7 @@ class Employee(models.Model):
     middle_name = models.CharField(max_length=100, blank=True)
     birth_date = models.DateField(default='1970-01-01')
     gender = models.CharField(max_length=1, choices=Gender.choices, default='M')
+    iin = models.CharField(max_length=12, null=True, blank=True)
     photo = models.ImageField(upload_to='employees/photos/', null=True, blank=True)
 
     # Служебная информация

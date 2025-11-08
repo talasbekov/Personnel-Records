@@ -5,15 +5,15 @@ from organization_management.apps.employees.models import Employee, EmployeeTran
 @admin.register(Employee)
 class EmployeeAdmin(admin.ModelAdmin):
     list_display = ['personnel_number', 'last_name', 'first_name', 'middle_name',
-                    'rank', 'employment_status', 'hire_date']
+                    'rank', 'employment_status', 'hire_date', 'user']
     list_filter = ['employment_status', 'gender', 'rank']
     search_fields = ['personnel_number', 'last_name', 'first_name', 'middle_name',
-                     'work_email', 'personal_email']
+                     'work_email', 'personal_email', 'user__username', 'user__email']
     readonly_fields = ['created_at', 'updated_at']
     fieldsets = (
         ('Основная информация', {
             'fields': ('personnel_number', 'last_name', 'first_name', 'middle_name',
-                      'birth_date', 'gender', 'photo')
+                      'birth_date', 'gender', 'photo', 'user')
         }),
         ('Служебная информация', {
             'fields': ('rank', 'hire_date', 'dismissal_date', 'employment_status')

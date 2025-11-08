@@ -17,3 +17,4 @@ class StaffUnitAdmin(MPTTModelAdmin):
     list_display = ['division', 'position', 'employee', 'index']
     list_filter = ['division']
     search_fields = ['division__name', 'position__name', 'employee__last_name']
+    list_editable = ['index']

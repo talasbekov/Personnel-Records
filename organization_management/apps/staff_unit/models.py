@@ -73,15 +73,14 @@ class StaffUnit(MPTTModel):
     index = models.PositiveIntegerField(verbose_name=_('Номер слота'))
 
     class MPTTMeta:
-        order_insertion_by = ['division', 'position']
+        order_insertion_by = ['index', 'division', 'position']
 
     class Meta:
         db_table = 'staff_units'
         verbose_name = _('Штатная единица')
         verbose_name_plural = _('Штатные единицы')
-        unique_together = ('division', 'position', 'index')
+        unique_together = ('division', 'position')
 
     def __str__(self):
         emp_name = f"{self.employee}" if self.employee else "Вакансия"
         return f"{self.division} - {self.position} - {emp_name} #{self.index}"
-

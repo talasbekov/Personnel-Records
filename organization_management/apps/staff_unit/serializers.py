@@ -5,7 +5,7 @@ from organization_management.apps.employees.models import Employee
 from organization_management.apps.staff_unit.models import Vacancy, StaffUnit
 from organization_management.apps.dictionaries.models import Position
 from organization_management.apps.dictionaries.api.serializers import PositionSerializer as DictionaryPositionSerializer
-
+from organization_management.apps.statuses.models import EmployeeStatus
 
 
 class VacancySerializer(serializers.ModelSerializer):
@@ -24,11 +24,30 @@ class PositionSerializer(serializers.ModelSerializer):
         model = Position
         fields = ["id", "name"]
 
+class EmployeeStatusSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EmployeeStatus
+        fields = ("status_type", "state", "start_date", "end_date")
+
 
 class EmployeeSerializer(serializers.ModelSerializer):
+    current_status = serializers.SerializerMethodField(read_only=True)
+
     class Meta:
         model = Employee
-        fields = ["id", "first_name", "last_name"]
+        fields = ["id", "first_name", "last_name", "current_status"]
+
+    def get_current_status(self, obj):
+        status = (
+            obj.statuses
+            .filter(state=EmployeeStatus.StatusState.ACTIVE)
+            .order_by("-start_date")
+            .first()
+        )
+        return EmployeeStatusSerializer(status).data if status else {
+            "status_type": EmployeeStatus.StatusType.IN_SERVICE,
+            "state": EmployeeStatus.StatusState.ACTIVE,
+        }
 
 
 class StaffUnitSerializer(serializers.ModelSerializer):
