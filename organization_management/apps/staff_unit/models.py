@@ -27,6 +27,17 @@ class Vacancy(models.Model):
         db_table = 'vacancies'
         verbose_name = _('Вакансия')
         verbose_name_plural = _('Вакансии')
+        permissions = [
+            ('view_vacancies', 'Просмотр вакансий'),
+            ('view_vacancies_division', 'Просмотр вакансий подразделения'),
+            ('create_vacancy', 'Создание вакансии'),
+            ('create_vacancy_division', 'Создание вакансии в подразделении'),
+            ('edit_vacancy', 'Редактирование вакансии'),
+            ('close_vacancy', 'Закрытие вакансии'),
+            ('fill_vacancy', 'Заполнение вакансии'),
+            ('publish_vacancy', 'Публикация вакансии'),
+            ('unpublish_vacancy', 'Снятие вакансии с публикации'),
+        ]
 
     def __str__(self):
         return f'{self.id} {self.status} ({self.requirements}) ({self.responsibilities})'
@@ -80,6 +91,20 @@ class StaffUnit(MPTTModel):
         verbose_name = _('Штатная единица')
         verbose_name_plural = _('Штатные единицы')
         unique_together = ('division', 'position')
+        permissions = [
+            ('view_staffing_table', 'Просмотр штатного расписания'),
+            ('view_staffing_table_division', 'Просмотр штатного расписания подразделения'),
+            ('view_staffing_table_all', 'Просмотр штатного расписания всей организации'),
+            ('view_position_quota', 'Просмотр квоты должностей'),
+            ('view_staffing_statistics', 'Просмотр статистики по штатному расписанию'),
+            ('manage_staffing_table', 'Полное управление штатным расписанием'),
+            ('manage_staffing_table_division', 'Управление штатным расписанием подразделения'),
+            ('create_staffing_position', 'Создание штатной позиции'),
+            ('edit_staffing_position', 'Редактирование штатной позиции'),
+            ('delete_staffing_position', 'Удаление штатной позиции'),
+            ('change_position_quota', 'Изменение квоты должностей'),
+            ('reserve_position', 'Резервирование должности'),
+        ]
 
     def __str__(self):
         emp_name = f"{self.employee}" if self.employee else "Вакансия"

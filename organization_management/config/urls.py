@@ -14,15 +14,15 @@ urlpatterns = [
     path("api/token/refresh/", TokenRefreshView.as_view(), name="token_refresh"),
 
     # API Documentation (короткие URL)
-    path('docs/', SpectacularSwaggerView.as_view(url_name='schema'), name='docs'),
-    path('redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc-short'),
+    path('docs', SpectacularSwaggerView.as_view(url_name='schema'), name='docs'),
+    path('redoc', SpectacularRedocView.as_view(url_name='schema'), name='redoc-short'),
 
     # API Schema (cached to avoid heavy regen on each request):
     path('api/schema/', cache_page(60 * 60)(SpectacularAPIView.as_view()), name='schema'),
 
     # Optional UI (длинные URL для обратной совместимости):
-    path('api/schema/swagger-ui/', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
-    path('api/schema/redoc/', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
+    path('api/schema/swagger-ui', SpectacularSwaggerView.as_view(url_name='schema'), name='swagger-ui'),
+    path('api/schema/redoc', SpectacularRedocView.as_view(url_name='schema'), name='redoc'),
 
     # API Endpoints:
     path("api/staff_unit/", include("organization_management.apps.staff_unit.urls")),

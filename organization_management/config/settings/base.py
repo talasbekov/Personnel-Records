@@ -36,6 +36,7 @@ INSTALLED_APPS = [
     'mptt',
 
     # Apps
+    'organization_management.apps.common',
     'organization_management.apps.divisions',
     'organization_management.apps.employees',
     'organization_management.apps.statuses',
@@ -148,6 +149,7 @@ SIMPLE_JWT = {
     'AUTH_HEADER_TYPES': ('Bearer',),
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
+    'TOKEN_OBTAIN_SERIALIZER': 'organization_management.apps.common.jwt_serializers.CustomTokenObtainPairSerializer',
 }
 
 # DRF Spectacular (Swagger/OpenAPI)
