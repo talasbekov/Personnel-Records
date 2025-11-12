@@ -201,6 +201,29 @@ def has_role_permission(role: str, permission: str) -> bool:
             # Отчёты
             'generate_report_division', 'view_reports', 'download_report',
         ],
+        'ROLE_7': [
+            # === Начальник департамента - просмотр и редактирование ВСЕГО ДЕПАРТАМЕНТА ===
+            # Штатное расписание и вакансии
+            'view_staffing_table', 'view_staffing_table_division', 'view_position_quota',
+            'manage_staffing_table', 'create_staffing_position', 'edit_staffing_position',
+            'delete_staffing_position', 'view_vacancies', 'view_vacancies_division',
+            'create_vacancy', 'edit_vacancy', 'close_vacancy', 'fill_vacancy',
+            # Сотрудники
+            'view_employees', 'view_employee_details', 'view_employee_card',
+            'hire_employee', 'edit_employee', 'edit_employee_personal_data',
+            'transfer_employee', 'assign_position', 'change_position',
+            # Статусы (редактирование всего департамента)
+            'view_employee_statuses', 'change_employee_status', 'change_status_in_department',
+            'schedule_status', 'bulk_change_status', 'view_vacation_calendar',
+            # Прикомандирование
+            'view_secondments', 'second_from_department', 'create_secondment_request',
+            'approve_to_department', 'return_seconded_employee',
+            # Структура (редактирование департамента)
+            'view_department', 'edit_department', 'view_directorate', 'view_division',
+            'create_directorate', 'edit_directorate', 'create_division', 'edit_division',
+            # Отчёты
+            'generate_report_department', 'view_reports', 'download_report',
+        ],
     }
     
     # Нормализация названия права (убрать префикс приложения если есть)
@@ -252,46 +275,53 @@ def is_in_scope(user: User, obj: Any, permission: str) -> bool:
     
     # Роль-2: только департамент
     if role == 'ROLE_2':
-        department = role_info.scope_division
+        department = role_info.effective_scope_division
         if not department:
             return False
         return is_in_department(obj_division, department)
     
-    # Роль-3: просмотр - департамент, редактирование - управление
+    # Роль-3: просмотр и редактирование - только СВОЕ управление и дочерние отделы
+    # НЕ весь департамент!
     if role == 'ROLE_3':
-        directorate = role_info.scope_division
+        directorate = role_info.effective_scope_division
         if not directorate:
             return False
-        
-        # Для просмотра достаточно быть в департаменте
+
+        # Для просмотра - только управление и его дочерние
         if permission.startswith('view_'):
-            department = directorate.get_department() if hasattr(directorate, 'get_department') else directorate.parent
-            return is_in_department(obj_division, department)
-        
-        # Для редактирования должно быть в управлении
+            return is_in_directorate(obj_division, directorate)
+
+        # Для редактирования - также только управление
         return is_in_directorate(obj_division, directorate)
     
     # Роль-5: подразделение (может быть департамент, управление или отдел)
     if role == 'ROLE_5':
-        scope = role_info.scope_division
+        scope = role_info.effective_scope_division
         if not scope:
             return False
         return is_in_subtree(obj_division, scope)
     
-    # Роль-6: просмотр - департамент, редактирование - отдел
+    # Роль-6: просмотр и редактирование - только СВОЙ отдел и дочерние подразделения
+    # НЕ весь департамент!
     if role == 'ROLE_6':
-        division = role_info.scope_division
+        division = role_info.effective_scope_division
         if not division:
             return False
-        
-        # Для просмотра достаточно быть в департаменте
+
+        # Для просмотра - только отдел и его дочерние
         if permission.startswith('view_'):
-            department = division.get_department() if hasattr(division, 'get_department') else division.get_ancestors().filter(level=0).first()
-            return is_in_department(obj_division, department)
-        
-        # Для редактирования должно быть в отделе
-        return obj_division == division or obj_division.is_descendant_of(division)
-    
+            return obj_division == division or (hasattr(obj_division, 'is_descendant_of') and obj_division.is_descendant_of(division))
+
+        # Для редактирования - также только отдел
+        return obj_division == division or (hasattr(obj_division, 'is_descendant_of') and obj_division.is_descendant_of(division))
+
+    # Роль-7: весь департамент (просмотр и редактирование)
+    if role == 'ROLE_7':
+        department = role_info.effective_scope_division
+        if not department:
+            return False
+        return is_in_department(obj_division, department)
+
     return False
 
 
@@ -467,7 +497,7 @@ def get_user_scope_queryset(user: User, model_class):
     role_info = user.role_info
     role = role_info.role
 
-    # Роли с полным доступом
+    # Роли с полным доступом ко всей организации
     if role in ['ROLE_1', 'ROLE_4'] or user.is_superuser:
         return model_class.objects.all()
 
@@ -478,7 +508,7 @@ def get_user_scope_queryset(user: User, model_class):
     if not division_field:
         return model_class.objects.none()
 
-    scope = role_info.scope_division
+    scope = role_info.effective_scope_division
     if not scope:
         return model_class.objects.none()
 
@@ -549,19 +579,25 @@ def _get_scope_division_ids(role: str, scope) -> list:
             return list(scope.get_descendants(include_self=True).values_list('id', flat=True))
         return [scope.id]
 
-    # Роль-3: департамент (весь) для просмотра
+    # Роль-3: весь департамент (родитель управления и все его потомки)
     if role == 'ROLE_3':
-        # Найти департамент (родительское подразделение level=0)
-        department = scope
-        if hasattr(scope, 'get_ancestors'):
-            ancestors = scope.get_ancestors()
-            dept = ancestors.filter(level=0).first()
-            if dept:
-                department = dept
+        # Если scope уже на уровне департамента (level=1), возвращаем его и потомков
+        if scope.level == 1:
+            if hasattr(scope, 'get_descendants'):
+                return list(scope.get_descendants(include_self=True).values_list('id', flat=True))
+            return [scope.id]
 
-        if hasattr(department, 'get_descendants'):
-            return list(department.get_descendants(include_self=True).values_list('id', flat=True))
-        return [department.id]
+        # Если scope на уровне управления (level=2), поднимаемся к департаменту
+        if scope.level == 2 and scope.parent:
+            department = scope.parent
+            if hasattr(department, 'get_descendants'):
+                return list(department.get_descendants(include_self=True).values_list('id', flat=True))
+            return [department.id]
+
+        # Для других уровней возвращаем scope и его потомков
+        if hasattr(scope, 'get_descendants'):
+            return list(scope.get_descendants(include_self=True).values_list('id', flat=True))
+        return [scope.id]
 
     # Роль-5: подразделение и все дочерние
     if role == 'ROLE_5':
@@ -569,18 +605,24 @@ def _get_scope_division_ids(role: str, scope) -> list:
             return list(scope.get_descendants(include_self=True).values_list('id', flat=True))
         return [scope.id]
 
-    # Роль-6: департамент для просмотра
+    # Роль-6: весь департамент (поднимаемся к департаменту через родителей)
     if role == 'ROLE_6':
-        # Найти департамент
-        department = scope
-        if hasattr(scope, 'get_ancestors'):
-            ancestors = scope.get_ancestors()
-            dept = ancestors.filter(level=0).first()
-            if dept:
-                department = dept
+        # Отдел обычно на уровне 3, управление на уровне 2, департамент на уровне 1
+        # Поднимаемся к департаменту
+        current = scope
+        # Ищем департамент (обычно level=1)
+        while current.parent and current.level > 1:
+            current = current.parent
 
-        if hasattr(department, 'get_descendants'):
-            return list(department.get_descendants(include_self=True).values_list('id', flat=True))
-        return [department.id]
+        # Теперь current должен быть департаментом
+        if hasattr(current, 'get_descendants'):
+            return list(current.get_descendants(include_self=True).values_list('id', flat=True))
+        return [current.id]
+
+    # Роль-7: весь департамент (аналогично ROLE_2)
+    if role == 'ROLE_7':
+        if hasattr(scope, 'get_descendants'):
+            return list(scope.get_descendants(include_self=True).values_list('id', flat=True))
+        return [scope.id]
 
     return []

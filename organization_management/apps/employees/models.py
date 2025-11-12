@@ -24,7 +24,7 @@ class Employee(models.Model):
 
     # Служебная информация
     rank = models.ForeignKey('dictionaries.Rank', on_delete=models.PROTECT, null=True, blank=True)
-    user = models.ForeignKey('auth.User', on_delete=models.SET_NULL, null=True, blank=True)
+    user = models.OneToOneField('auth.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='employee')
     hire_date = models.DateField(default='1970-01-01')
     dismissal_date = models.DateField(null=True, blank=True)
     is_active = models.BooleanField(default=True)

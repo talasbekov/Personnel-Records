@@ -26,6 +26,7 @@ class UserRole(models.Model):
         SYS_ADMIN = 'ROLE_4', 'Системный администратор'
         HR_ADMIN = 'ROLE_5', 'Кадровый администратор подразделения'
         HEAD_DIVISION = 'ROLE_6', 'Начальник отдела'
+        HEAD_DEPARTMENT = 'ROLE_7', 'Начальник департамента'
     
     user = models.OneToOneField(
         User, 
@@ -80,26 +81,34 @@ class UserRole(models.Model):
     def clean(self):
         """Валидация модели"""
         super().clean()
-        
-        # Роли 2, 3, 5, 6 требуют указания области видимости
+
+        # Роли 2, 3, 5, 6, 7 требуют наличия подразделения
+        # (либо через scope_division, либо через Employee)
         roles_requiring_scope = [
             self.RoleType.OBSERVER_DEPT,
             self.RoleType.HEAD_DIRECTORATE,
             self.RoleType.HR_ADMIN,
-            self.RoleType.HEAD_DIVISION
+            self.RoleType.HEAD_DIVISION,
+            self.RoleType.HEAD_DEPARTMENT
         ]
-        
-        if self.role in roles_requiring_scope and not self.scope_division:
-            raise ValidationError({
-                'scope_division': f'Для роли {self.get_role_display()} необходимо указать область видимости'
-            })
-        
+
+        if self.role in roles_requiring_scope:
+            # Проверяем, что можем определить подразделение
+            division = self.get_user_division()
+            if not division:
+                raise ValidationError({
+                    'scope_division': (
+                        f'Для роли {self.get_role_display()} необходимо либо указать '
+                        f'область видимости вручную, либо привязать пользователя к Employee с StaffUnit'
+                    )
+                })
+
         # Роли 1 и 4 не должны иметь область видимости
         roles_without_scope = [
             self.RoleType.OBSERVER_ORG,
             self.RoleType.SYS_ADMIN
         ]
-        
+
         if self.role in roles_without_scope and self.scope_division:
             raise ValidationError({
                 'scope_division': f'Для роли {self.get_role_display()} не должна быть указана область видимости'
@@ -112,28 +121,70 @@ class UserRole(models.Model):
     @property
     def department(self):
         """Возвращает департамент в зависимости от роли"""
-        if not self.scope_division:
+        division = self.effective_scope_division
+        if not division:
             return None
-        
+
         if self.role == self.RoleType.OBSERVER_DEPT:
-            # Для Роль-2 scope_division это и есть департамент
-            return self.scope_division if self.scope_division.level == 0 else None
-        
+            # Для Роль-2 effective_scope_division это и есть департамент
+            return division if division.level == 0 else None
+
         # Для остальных ролей ищем департамент вверх по иерархии
-        return self.scope_division.get_department()
+        return division.get_department()
     
+    def get_user_division(self):
+        """
+        Автоматически определяет подразделение пользователя.
+
+        Логика:
+        1. Если пользователь откомандирован - возвращает seconded_to
+        2. Если указан scope_division вручную - возвращает его (ВЫСОКИЙ ПРИОРИТЕТ)
+        3. Если у пользователя есть Employee и StaffUnit - возвращает division из StaffUnit (автоматически)
+        4. Иначе возвращает None
+
+        Returns:
+            Division или None
+        """
+        # Приоритет 1: Откомандирование
+        if self.is_seconded and self.seconded_to:
+            return self.seconded_to
+
+        # Приоритет 2: Вручную указанное подразделение (переопределяет автоматическое)
+        if self.scope_division:
+            return self.scope_division
+
+        # Приоритет 3: Автоматическое определение через Employee → StaffUnit → Division
+        try:
+            # User → Employee → StaffUnit → Division
+            if hasattr(self.user, 'employee'):
+                employee = self.user.employee
+                if hasattr(employee, 'staff_unit') and employee.staff_unit:
+                    return employee.staff_unit.division
+        except Exception:
+            pass
+
+        return None
+
+    @property
+    def effective_scope_division(self):
+        """
+        Возвращает эффективную область видимости с учётом автоматического определения.
+        Использовать это свойство вместо прямого обращения к scope_division.
+        """
+        return self.get_user_division()
+
     @property
     def can_edit_statuses(self):
         """Проверка права на редактирование статусов с учётом откомандирования"""
         if self.role == self.RoleType.SYS_ADMIN:
             return True
-        
-        if self.role in [self.RoleType.HEAD_DIRECTORATE, self.RoleType.HEAD_DIVISION]:
+
+        if self.role in [self.RoleType.HEAD_DIRECTORATE, self.RoleType.HEAD_DIVISION, self.RoleType.HEAD_DEPARTMENT]:
             # Если откомандирован - не может редактировать статусы
             return not self.is_seconded
-        
+
         # Роль-5 (кадровик) не может редактировать статусы
         if self.role == self.RoleType.HR_ADMIN:
             return False
-        
+
         return False

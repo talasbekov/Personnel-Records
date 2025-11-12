@@ -20,31 +20,47 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         token['email'] = user.email
         token['is_staff'] = user.is_staff
         token['is_superuser'] = user.is_superuser
-        
+
+
+
         # Информация о роли
         if hasattr(user, 'role_info'):
             role_info = user.role_info
-            
+
             # Роль
             token['role'] = role_info.role
             token['role_name'] = role_info.get_role_display()
-            
-            # Область видимости
-            if role_info.scope_division:
-                token['scope_division_id'] = role_info.scope_division.id
-                token['scope_division_name'] = role_info.scope_division.name
-                token['scope_division_level'] = role_info.scope_division.level
-                
+
+            # Область видимости (автоматически определяется)
+            effective_division = role_info.effective_scope_division
+            if effective_division:
+                token['scope_division_id'] = effective_division.id
+                token['scope_division_name'] = effective_division.name
+                token['scope_division_level'] = effective_division.level
+
                 # Для удобства добавляем тип подразделения
-                if role_info.scope_division.level == 0:
+                if effective_division.level == 0:
                     token['scope_type'] = 'department'
-                elif role_info.scope_division.level == 1:
+                elif effective_division.level == 1:
                     token['scope_type'] = 'directorate'
                 else:
                     token['scope_type'] = 'division'
+
+                # Добавляем информацию об источнике подразделения
+                if role_info.is_seconded and role_info.seconded_to:
+                    token['scope_source'] = 'secondment'
+                elif hasattr(user, 'employee'):
+                    try:
+                        if hasattr(user.employee, 'staff_unit') and user.employee.staff_unit:
+                            token['scope_source'] = 'auto'
+                    except:
+                        pass
+                if 'scope_source' not in token and role_info.scope_division:
+                    token['scope_source'] = 'manual'
             else:
                 token['scope_division_id'] = None
                 token['scope_type'] = 'all'  # Вся организация
+                token['scope_source'] = 'none'
             
             # Статус откомандирования
             token['is_seconded'] = role_info.is_seconded
@@ -104,12 +120,25 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
                 'is_seconded': role_info.is_seconded,
                 'can_edit_statuses': role_info.can_edit_statuses,
             }
-            
-            if role_info.scope_division:
+
+            effective_division = role_info.effective_scope_division
+            if effective_division:
+                # Определяем источник подразделения
+                scope_source = 'manual'
+                if role_info.is_seconded and role_info.seconded_to:
+                    scope_source = 'secondment'
+                elif hasattr(user, 'employee'):
+                    try:
+                        if hasattr(user.employee, 'staff_unit') and user.employee.staff_unit:
+                            scope_source = 'auto'
+                    except:
+                        pass
+
                 data['user']['role']['scope'] = {
-                    'id': role_info.scope_division.id,
-                    'name': role_info.scope_division.name,
-                    'level': role_info.scope_division.level,
+                    'id': effective_division.id,
+                    'name': effective_division.name,
+                    'level': effective_division.level,
+                    'source': scope_source,
                 }
         
         return data

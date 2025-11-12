@@ -84,7 +84,9 @@ class StaffUnit(MPTTModel):
     index = models.PositiveIntegerField(verbose_name=_('Номер слота'))
 
     class MPTTMeta:
-        order_insertion_by = ['index', 'division', 'position']
+        # Сортировка только по index для правильного порядка
+        # (division и position не используются т.к. их ID не соответствуют логическому порядку)
+        order_insertion_by = ['division', 'position']
 
     class Meta:
         db_table = 'staff_units'
@@ -108,4 +110,4 @@ class StaffUnit(MPTTModel):
 
     def __str__(self):
         emp_name = f"{self.employee}" if self.employee else "Вакансия"
-        return f"{self.division} - {self.position} - {emp_name} #{self.index}"
+        return f"{self.division} - {self.id} - {self.position} - {emp_name} #{self.index}"
