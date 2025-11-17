@@ -1,7 +1,7 @@
 """
 Сигналы для автоматической обработки статусов
 """
-from django.db.models.signals import pre_save
+from django.db.models.signals import pre_save, post_save
 from django.dispatch import receiver
 from django.utils import timezone
 
@@ -51,9 +51,10 @@ def close_statuses_on_dismissal(sender, instance, **kwargs):
         status.actual_end_date = dismissal_date
         status.state = EmployeeStatus.StatusState.COMPLETED
         status.early_termination_reason = f"Автоматически завершен в связи с увольнением сотрудника ({dismissal_date})"
+        status._skip_history_log = True  # Пропускаем автоматическое логирование
         status.save()
 
-        # Создаем запись в истории
+        # Создаем запись в истории вручную с более подробной информацией
         StatusChangeHistory.objects.create(
             status=status,
             change_type=StatusChangeHistory.ChangeType.TERMINATED,
@@ -72,4 +73,38 @@ def close_statuses_on_dismissal(sender, instance, **kwargs):
         status.cancel(
             reason=f"Автоматически отменен в связи с увольнением сотрудника ({dismissal_date})",
             user=None
+        )
+
+
+@receiver(post_save, sender=EmployeeStatus)
+def log_status_change(sender, instance, created, **kwargs):
+    """
+    Автоматическое создание записи в истории изменений при создании или изменении статуса
+
+    Это гарантирует, что все изменения статусов логируются в StatusChangeHistory,
+    даже если они создаются через API без явного вызова методов модели
+    """
+    # Пропускаем, если запись истории уже создается внутри методов модели
+    # (чтобы избежать дублирования)
+    if getattr(instance, '_skip_history_log', False):
+        return
+
+    # Определяем пользователя из контекста (если доступен)
+    changed_by = instance.created_by if created else getattr(instance, '_changed_by', None)
+
+    if created:
+        # Создание нового статуса
+        StatusChangeHistory.objects.create(
+            status=instance,
+            change_type=StatusChangeHistory.ChangeType.CREATED,
+            changed_by=changed_by,
+            comment=f"Создан статус '{instance.get_status_type_display()}' ({instance.start_date} - {instance.end_date or 'н/д'})"
+        )
+    else:
+        # Изменение существующего статуса
+        StatusChangeHistory.objects.create(
+            status=instance,
+            change_type=StatusChangeHistory.ChangeType.MODIFIED,
+            changed_by=changed_by,
+            comment=f"Статус '{instance.get_status_type_display()}' изменен"
         )

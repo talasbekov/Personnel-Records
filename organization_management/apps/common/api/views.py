@@ -2,23 +2,38 @@ from rest_framework import viewsets, permissions
 from rest_framework.response import Response
 from rest_framework.decorators import action
 
-from organization_management.apps.common.models import UserRole
+from organization_management.apps.common.models import Role
 from .serializers import RoleTypeSerializer
 
 
 class RoleTypeViewSet(viewsets.ViewSet):
     """
-    ViewSet 4;O ?>;CG5=8O A?8A:0 B8?>2 @>;59
+    ViewSet для получения списка типов ролей из БД
+
+    После миграции на новую систему RBAC, роли теперь хранятся в таблице roles.
+    Этот эндпоинт возвращает все активные роли для использования в UI.
     """
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = RoleTypeSerializer  # Добавляем для drf-spectacular
 
     def list(self, request):
         """
-        >72@0I05B A?8A>: 2A5E 4>ABC?=KE B8?>2 @>;59
+        Возвращает список всех активных ролей из БД
+
+        Возвращает:
+            [
+                {'value': 'ROLE_1', 'label': 'Наблюдатель организации'},
+                {'value': 'ROLE_2', 'label': 'Наблюдатель департамента'},
+                ...
+            ]
         """
+        # Получаем все активные роли из БД, сортируем по порядку
+        db_roles = Role.objects.filter(is_active=True).order_by('sort_order', 'code')
+
         roles = [
-            {'value': choice[0], 'label': choice[1]}
-            for choice in UserRole.RoleType.choices
+            {'value': role.code, 'label': role.name}
+            for role in db_roles
         ]
+
         serializer = RoleTypeSerializer(roles, many=True)
         return Response(serializer.data)

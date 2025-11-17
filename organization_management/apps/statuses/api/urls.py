@@ -4,7 +4,7 @@ from .views import EmployeeStatusViewSet, StatusDocumentViewSet
 
 router = DefaultRouter()
 router.register(r'statuses', EmployeeStatusViewSet, basename='employee-status')
-router.register(r'status-documents', StatusDocumentViewSet, basename='status-document')
+# router.register(r'status-documents', StatusDocumentViewSet, basename='status-document')
 
 urlpatterns = [
     path('', include(router.urls)),

@@ -508,21 +508,54 @@ class StatusApplicationService:
         end_date: Optional[date] = None
     ) -> Dict[str, Any]:
         """
-        Получение статистики по типам отсутствий за период
+        Получение статистики по типам отсутствий за период и количеству штата
 
         Args:
-            division_id: ID подразделения (опционально)
+            division_id: ID подразделения (опционально, если None - вся организация)
             start_date: Начало периода
             end_date: Конец периода
 
         Returns:
-            Dict: Статистика по отсутствиям
+            Dict: Статистика по отсутствиям и количеству штата
         """
         if start_date is None:
             start_date = timezone.now().date() - timedelta(days=30)
         if end_date is None:
             end_date = timezone.now().date()
 
+        # Получаем количество штата (сотрудников)
+        from organization_management.apps.staff_unit.models import StaffUnit
+        from organization_management.apps.divisions.models import Division
+
+        if division_id:
+            # Для конкретного подразделения и всех дочерних
+            try:
+                division = Division.objects.get(pk=division_id)
+                # Получаем все дочерние подразделения включая само подразделение
+                division_ids = list(
+                    division.get_descendants(include_self=True).values_list('id', flat=True)
+                )
+            except Division.DoesNotExist:
+                division_ids = [division_id]
+
+            staff_count = StaffUnit.objects.filter(
+                division_id__in=division_ids,
+                employee__isnull=False
+            ).count()
+
+            employee_ids = StaffUnit.objects.filter(
+                division_id__in=division_ids,
+                employee__isnull=False
+            ).values_list('employee_id', flat=True)
+        else:
+            # Для всей организации
+            staff_count = StaffUnit.objects.filter(
+                employee__isnull=False
+            ).count()
+
+            employee_ids = None
+
+        # Статистика по статусам
         queryset = EmployeeStatus.objects.filter(
             start_date__lte=end_date
         ).filter(
@@ -531,21 +564,16 @@ class StatusApplicationService:
             status_type=EmployeeStatus.StatusType.IN_SERVICE
         )
 
-        if division_id:
-            from organization_management.apps.staff_unit.models import StaffUnit
-            employee_ids = StaffUnit.objects.filter(
-                division_id=division_id,
-                employee__isnull=False
-            ).values_list('employee_id', flat=True)
+        if employee_ids is not None:
             queryset = queryset.filter(employee_id__in=employee_ids)
 
-        # Подсчет по типам
+        # Подсчет по типам (используем код статуса на английском)
         statistics = {}
         for status_type, display_name in EmployeeStatus.StatusType.choices:
             if status_type == EmployeeStatus.StatusType.IN_SERVICE:
                 continue
             count = queryset.filter(status_type=status_type).count()
-            statistics[display_name] = count
+            statistics[status_type] = count
 
         return {
             'period': {
@@ -553,6 +581,7 @@ class StatusApplicationService:
                 'end_date': end_date
             },
             'division_id': division_id,
+            'staff_count': staff_count,
             'total_absences': queryset.count(),
             'by_type': statistics
         }

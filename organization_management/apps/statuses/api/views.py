@@ -54,6 +54,7 @@ class EmployeeStatusViewSet(viewsets.ModelViewSet):
     queryset = EmployeeStatus.objects.all()
     serializer_class = EmployeeStatusSerializer
     permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ['get', 'head', 'options']
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -507,30 +508,57 @@ class EmployeeStatusViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['get'])
     def absence_statistics(self, request):
         """
-        Получение статистики по типам отсутствий за период
+        Получение статистики по типам отсутствий на сегодняшний день
 
-        Query params:
-        - division_id (optional): ID подразделения
-        - start_date (optional): Начало периода (YYYY-MM-DD)
-        - end_date (optional): Конец периода (YYYY-MM-DD)
+        Автоматически определяет подразделение пользователя через:
+        User → Employee → StaffUnit → Division
+
+        Query params: нет (используется текущая дата и подразделение пользователя)
         """
-        division_id = request.query_params.get('division_id')
-        start_date_str = request.query_params.get('start_date')
-        end_date_str = request.query_params.get('end_date')
+        user = request.user
+
+        # Определяем подразделение пользователя через Employee → StaffUnit → Division
+        division_id = None
 
         try:
-            start_date_val = date.fromisoformat(start_date_str) if start_date_str else None
-            end_date_val = date.fromisoformat(end_date_str) if end_date_str else None
-        except ValueError:
+            # User → Employee
+            if hasattr(user, 'employee'):
+                employee = user.employee
+
+                # Employee → StaffUnit → Division
+                if hasattr(employee, 'staff_unit') and employee.staff_unit:
+                    staff_unit = employee.staff_unit
+
+                    if staff_unit.division:
+                        division_id = staff_unit.division.id
+                    else:
+                        return Response(
+                            {'error': 'У штатной единицы сотрудника не указано подразделение'},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                else:
+                    return Response(
+                        {'error': 'Сотрудник не привязан к штатной единице'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+            else:
+                return Response(
+                    {'error': 'Пользователь не привязан к сотруднику'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        except Exception as e:
             return Response(
-                {'error': 'Неверный формат даты. Используйте YYYY-MM-DD'},
+                {'error': f'Ошибка при определении подразделения: {str(e)}'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # Используем сегодняшнюю дату
+        today = date.today()
+
         statistics_data = self.service.get_absence_statistics(
-            division_id=int(division_id) if division_id else None,
-            start_date=start_date_val,
-            end_date=end_date_val
+            division_id=division_id,
+            start_date=today,
+            end_date=today
         )
 
         serializer = AbsenceStatisticsSerializer(statistics_data)

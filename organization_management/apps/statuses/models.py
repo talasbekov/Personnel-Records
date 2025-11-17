@@ -185,49 +185,10 @@ class EmployeeStatus(models.Model):
                                f'Текущая длительность: {vacation_duration} дней.'
                 })
 
-        # Проверка пересечений с другими активными статусами
-        if self.state in [self.StatusState.ACTIVE, self.StatusState.PLANNED] and self.employee_id:
-            self._check_overlapping_statuses()
-
-    def _check_overlapping_statuses(self):
-        """Проверка пересечений с другими статусами"""
-        qs = EmployeeStatus.objects.filter(
-            employee_id=self.employee_id,
-            state__in=[self.StatusState.ACTIVE, self.StatusState.PLANNED]
-        )
-        if self.pk:
-            qs = qs.exclude(pk=self.pk)
-
-        # Определяем конечную дату для проверки
-        check_end_date = self.actual_end_date or self.end_date
-
-        # Проверка пересечений
-        # Пересечение: (start1 <= end2 OR end2 is NULL) AND (start2 <= end1 OR end1 is NULL)
-        overlap_qs = qs.filter(
-            start_date__lte=check_end_date if check_end_date else models.F('start_date')
-        )
-
-        if check_end_date:
-            overlap_qs = overlap_qs.filter(
-                models.Q(end_date__isnull=True) |
-                models.Q(end_date__gte=self.start_date) |
-                models.Q(actual_end_date__gte=self.start_date)
-            )
-
-        if overlap_qs.exists():
-            overlapping = overlap_qs.first()
-
-            # Исключение: разрешаем два статуса одновременно, если один из них - прикомандирование
-            is_secondment_exception = (
-                self.status_type in [self.StatusType.SECONDED_FROM, self.StatusType.SECONDED_TO] or
-                overlapping.status_type in [self.StatusType.SECONDED_FROM, self.StatusType.SECONDED_TO]
-            )
-
-            if not is_secondment_exception:
-                raise ValidationError(
-                    f"Обнаружено пересечение со статусом '{overlapping.get_status_type_display()}' "
-                    f"({overlapping.start_date} - {overlapping.end_date or 'н/д'})."
-                )
+        # Проверка пересечений с другими активными статусами - ОТКЛЮЧЕНА
+        # Система теперь разрешает создавать пересекающиеся статусы
+        # Все изменения логируются в StatusChangeHistory
+        pass
 
     def save(self, *args, **kwargs):
         """Переопределенный метод сохранения"""
@@ -257,9 +218,10 @@ class EmployeeStatus(models.Model):
 
         old_end_date = self.end_date
         self.end_date = new_end_date
+        self._skip_history_log = True  # Пропускаем автоматическое логирование
         self.save()
 
-        # Создаем запись в истории изменений
+        # Создаем запись в истории изменений вручную с более подробной информацией
         StatusChangeHistory.objects.create(
             status=self,
             change_type=StatusChangeHistory.ChangeType.EXTENDED,
@@ -283,9 +245,10 @@ class EmployeeStatus(models.Model):
         self.actual_end_date = termination_date
         self.early_termination_reason = reason
         self.state = self.StatusState.COMPLETED
+        self._skip_history_log = True  # Пропускаем автоматическое логирование
         self.save()
 
-        # Создаем запись в истории изменений
+        # Создаем запись в истории изменений вручную с более подробной информацией
         StatusChangeHistory.objects.create(
             status=self,
             change_type=StatusChangeHistory.ChangeType.TERMINATED,
@@ -302,9 +265,10 @@ class EmployeeStatus(models.Model):
 
         self.state = self.StatusState.CANCELLED
         self.early_termination_reason = reason
+        self._skip_history_log = True  # Пропускаем автоматическое логирование
         self.save()
 
-        # Создаем запись в истории изменений
+        # Создаем запись в истории изменений вручную с более подробной информацией
         StatusChangeHistory.objects.create(
             status=self,
             change_type=StatusChangeHistory.ChangeType.CANCELLED,

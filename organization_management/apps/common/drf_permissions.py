@@ -144,8 +144,8 @@ class IsRoleAdmin(permissions.BasePermission):
             return True
         
         if hasattr(request.user, 'role_info'):
-            return request.user.role_info.role == 'ROLE_4'
-        
+            return request.user.role_info.get_role_code() == 'ROLE_4'
+
         return False
 
 
@@ -158,6 +158,6 @@ class IsRoleHRAdmin(permissions.BasePermission):
             return False
         
         if hasattr(request.user, 'role_info'):
-            return request.user.role_info.role in ['ROLE_4', 'ROLE_5']
-        
+            return request.user.role_info.get_role_code() in ['ROLE_4', 'ROLE_5']
+
         return False

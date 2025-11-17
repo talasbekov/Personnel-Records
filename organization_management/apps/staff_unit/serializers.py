@@ -1,9 +1,11 @@
+from typing import Dict, Any
 from rest_framework import serializers
+from drf_spectacular.utils import extend_schema_field
 
 from organization_management.apps.divisions.models import Division
 from organization_management.apps.employees.models import Employee
 from organization_management.apps.staff_unit.models import Vacancy, StaffUnit
-from organization_management.apps.dictionaries.models import Position
+from organization_management.apps.dictionaries.models import Position, Rank
 from organization_management.apps.dictionaries.api.serializers import PositionSerializer as DictionaryPositionSerializer
 from organization_management.apps.statuses.models import EmployeeStatus
 
@@ -31,13 +33,28 @@ class EmployeeStatusSerializer(serializers.ModelSerializer):
 
 
 class EmployeeSerializer(serializers.ModelSerializer):
+    rank = serializers.PrimaryKeyRelatedField(queryset=Rank.objects.all())
     current_status = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Employee
-        fields = ["id", "first_name", "last_name", "current_status"]
+        fields = ["id", "first_name", "last_name", "current_status", "rank"]
+        extra_kwargs = {
+            "first_name": {"required": True},
+            "last_name": {"required": True},
+        }
 
-    def get_current_status(self, obj):
+    @extend_schema_field(EmployeeStatusSerializer)
+    def get_current_status(self, obj: Employee) -> Dict[str, Any]:
+        """
+        Получить текущий статус сотрудника
+
+        Args:
+            obj: Объект Employee
+
+        Returns:
+            Словарь с данными текущего статуса
+        """
         status = (
             obj.statuses
             .filter(state=EmployeeStatus.StatusState.ACTIVE)

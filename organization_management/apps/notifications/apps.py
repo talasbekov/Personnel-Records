@@ -9,7 +9,6 @@ class NotificationsConfig(AppConfig):
     that model events generate corresponding notifications.  Uses the
     ``ready`` hook to avoid import side effects during startup.
     """
-    print("LOADING NOTIFICATIONS APP")
     default_auto_field = "django.db.models.BigAutoField"
     name = "organization_management.apps.notifications"
 

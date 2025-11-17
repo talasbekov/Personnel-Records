@@ -1,5 +1,12 @@
 """
 RBAC Engine - движок для проверки прав доступа на основе ролей
+
+Система полностью основана на БД:
+- Роли хранятся в таблице Role
+- Права хранятся в таблице Permission
+- Связи роль-право в таблице RolePermission
+
+Все настройки управляются через Django админку без изменения кода.
 """
 from typing import Optional, Any
 from django.contrib.auth.models import User
@@ -34,14 +41,16 @@ def check_permission(user: User, permission: str, obj: Any = None) -> bool:
         return False
     
     role_info = user.role_info
-    role = role_info.role
-    
+
+    # Получаем код роли (работает для обеих систем)
+    role = role_info.get_role_code()
+
     # Роль-4 (Системный администратор) имеет все права
     if role == 'ROLE_4':
         return True
-    
-    # Проверка откомандирования для ролей 3 и 6
-    if role in ['ROLE_3', 'ROLE_6'] and role_info.is_seconded:
+
+    # Проверка откомандирования для ролей 3, 6, 7
+    if role in ['ROLE_3', 'ROLE_6', 'ROLE_7'] and role_info.is_seconded:
         # Откомандированные начальники не могут редактировать статусы и данные
         restricted_permissions = [
             'change_status', 'edit_status', 'change_employee_status',
@@ -64,199 +73,72 @@ def check_permission(user: User, permission: str, obj: Any = None) -> bool:
 def has_role_permission(role: str, permission: str) -> bool:
     """
     Проверка что роль имеет данное право (базовая проверка без учёта области видимости)
-    
+
+    Читает права из БД с кешированием для производительности.
+
     Args:
         role: код роли (ROLE_1, ROLE_2, и т.д.)
         permission: название права
-    
+
     Returns:
         bool: True если роль имеет право
-    """
-    # Матрица прав на основе МАТРИЦА_ПРАВ.md
-    # Охватывает: StaffUnit, Vacancy, Employee, EmployeeStatus, Secondment, Division
 
-    ROLE_PERMISSIONS = {
-        'ROLE_1': [
-            # === Наблюдатель организации - только просмотр ВСЕЙ организации ===
-            # Штатное расписание и вакансии
-            'view_staffing_table', 'view_staffing_table_all', 'view_position_quota',
-            'view_staffing_statistics', 'view_vacancies', 'view_vacancies_all',
-            # Сотрудники
-            'view_employees', 'view_employee_details', 'view_employee_card',
-            'view_employee_contacts', 'view_employee_history',
-            # Статусы
-            'view_employee_statuses', 'view_employee_status_history', 'view_all_statuses',
-            'view_status_report',
-            # Прикомандирование
-            'view_secondments', 'view_secondment_details', 'view_secondment_history',
-            # Структура
-            'view_organization', 'view_department', 'view_directorate', 'view_division',
-            'view_division_tree',
-            # Отчёты
-            'view_reports', 'generate_report_organization', 'download_report',
-        ],
-        'ROLE_2': [
-            # === Наблюдатель департамента - просмотр ДЕПАРТАМЕНТА ===
-            # Штатное расписание и вакансии
-            'view_staffing_table', 'view_staffing_table_division', 'view_position_quota',
-            'view_vacancies', 'view_vacancies_division',
-            # Сотрудники
-            'view_employees', 'view_employee_details', 'view_employee_card',
-            'view_employee_history',
-            # Статусы
-            'view_employee_statuses', 'view_employee_status_history',
-            'view_department_statuses',
-            # Прикомандирование
-            'view_secondments', 'view_secondment_details',
-            # Структура
-            'view_department', 'view_directorate', 'view_division',
-            # Отчёты
-            'generate_report_department', 'view_reports', 'download_report',
-        ],
-        'ROLE_3': [
-            # === Начальник управления - просмотр департамента, редактирование управления ===
-            # Штатное расписание и вакансии (просмотр)
-            'view_staffing_table', 'view_staffing_table_division', 'view_position_quota',
-            'view_vacancies', 'view_vacancies_division',
-            # Сотрудники (просмотр)
-            'view_employees', 'view_employee_details', 'view_employee_card',
-            # Статусы (редактирование в управлении!)
-            'view_employee_statuses', 'change_status_in_directorate', 'change_employee_status',
-            'schedule_status', 'bulk_change_status', 'view_vacation_calendar',
-            # Прикомандирование (может откомандировать из управления)
-            'view_secondments', 'second_from_directorate', 'create_secondment_request',
-            'approve_to_directorate', 'return_seconded_employee',
-            # Структура (может редактировать управление)
-            'view_department', 'edit_own_directorate', 'create_division_in_directorate',
-            # Отчёты
-            'generate_report_directorate', 'view_reports', 'download_report',
-        ],
-        'ROLE_4': [
-            # === Системный администратор - ВСЕ ПРАВА ===
-            # Штатное расписание и вакансии
-            'view_staffing_table', 'view_staffing_table_all', 'view_position_quota',
-            'view_staffing_statistics', 'manage_staffing_table', 'create_staffing_position',
-            'edit_staffing_position', 'delete_staffing_position', 'change_position_quota',
-            'reserve_position', 'view_vacancies', 'create_vacancy', 'edit_vacancy',
-            'close_vacancy', 'fill_vacancy', 'publish_vacancy', 'unpublish_vacancy',
-            # Сотрудники
-            'view_employees', 'view_employee_details', 'hire_employee', 'fire_employee',
-            'edit_employee', 'edit_employee_personal_data', 'upload_employee_photo',
-            'transfer_employee', 'assign_position', 'change_position',
-            # Статусы
-            'view_employee_statuses', 'change_employee_status', 'change_status_all',
-            'schedule_status', 'bulk_change_status', 'view_all_statuses',
-            # Прикомандирование
-            'view_secondments', 'second_employee', 'approve_secondment_request',
-            'reject_secondment_request', 'return_seconded_employee',
-            # Структура
-            'view_organization', 'create_department', 'edit_department', 'delete_department',
-            'create_directorate', 'edit_directorate', 'create_division', 'edit_division',
-            # Отчёты
-            'generate_report', 'generate_report_organization', 'view_reports',
-            'manage_report_templates',
-            # Права и пользователи
-            'view_users', 'create_user', 'edit_user', 'assign_role', 'manage_permissions',
-            # Справочники
-            'manage_dictionaries', 'create_dictionary_item', 'edit_dictionary_item',
-            # Аудит
-            'view_audit_log', 'view_audit_log_all', 'export_audit_log',
-        ],
-        'ROLE_5': [
-            # === Кадровый администратор - управление кадрами в ПОДРАЗДЕЛЕНИИ ===
-            # Штатное расписание и вакансии
-            'view_staffing_table', 'view_staffing_table_division', 'manage_staffing_table_division',
-            'create_staffing_position', 'edit_staffing_position', 'delete_staffing_position',
-            'view_vacancies', 'view_vacancies_division', 'create_vacancy_division',
-            'edit_vacancy', 'close_vacancy', 'fill_vacancy',
-            # Сотрудники (может нанимать и редактировать в подразделении)
-            'view_employees', 'view_employee_details', 'hire_employee_in_division',
-            'edit_employee_in_division', 'edit_employee_personal_data',
-            'upload_employee_photo', 'transfer_employee_in_division',
-            'assign_position', 'assign_position_regular', 'assign_position_acting',
-            # Статусы (НЕ МОЖЕТ изменять)
-            'view_employee_statuses', 'view_employee_status_history',
-            # Структура (ограниченное управление)
-            'view_department', 'view_directorate', 'view_division',
-            'create_division_in_directorate',
-            # Отчёты (штатное расписание)
-            'generate_report_division_staffing', 'view_reports', 'download_report',
-            # Аудит
-            'view_audit_log_own_division',
-        ],
-        'ROLE_6': [
-            # === Начальник отдела - просмотр департамента, редактирование ОТДЕЛА ===
-            # Штатное расписание и вакансии (просмотр)
-            'view_staffing_table', 'view_staffing_table_division', 'view_position_quota',
-            'view_vacancies', 'view_vacancies_division',
-            # Сотрудники (просмотр)
-            'view_employees', 'view_employee_details', 'view_employee_card',
-            # Статусы (редактирование в отделе)
-            'view_employee_statuses', 'change_status_in_division', 'change_employee_status',
-            'schedule_status', 'view_vacation_calendar',
-            # Прикомандирование (только просмотр)
-            'view_secondments',
-            # Структура (просмотр департамента)
-            'view_department', 'view_directorate', 'view_division',
-            # Отчёты
-            'generate_report_division', 'view_reports', 'download_report',
-        ],
-        'ROLE_7': [
-            # === Начальник департамента - просмотр и редактирование ВСЕГО ДЕПАРТАМЕНТА ===
-            # Штатное расписание и вакансии
-            'view_staffing_table', 'view_staffing_table_division', 'view_position_quota',
-            'manage_staffing_table', 'create_staffing_position', 'edit_staffing_position',
-            'delete_staffing_position', 'view_vacancies', 'view_vacancies_division',
-            'create_vacancy', 'edit_vacancy', 'close_vacancy', 'fill_vacancy',
-            # Сотрудники
-            'view_employees', 'view_employee_details', 'view_employee_card',
-            'hire_employee', 'edit_employee', 'edit_employee_personal_data',
-            'transfer_employee', 'assign_position', 'change_position',
-            # Статусы (редактирование всего департамента)
-            'view_employee_statuses', 'change_employee_status', 'change_status_in_department',
-            'schedule_status', 'bulk_change_status', 'view_vacation_calendar',
-            # Прикомандирование
-            'view_secondments', 'second_from_department', 'create_secondment_request',
-            'approve_to_department', 'return_seconded_employee',
-            # Структура (редактирование департамента)
-            'view_department', 'edit_department', 'view_directorate', 'view_division',
-            'create_directorate', 'edit_directorate', 'create_division', 'edit_division',
-            # Отчёты
-            'generate_report_department', 'view_reports', 'download_report',
-        ],
-    }
-    
+    Raises:
+        Exception: Если роль не найдена в БД
+    """
     # Нормализация названия права (убрать префикс приложения если есть)
     perm_name = permission.split('.')[-1] if '.' in permission else permission
-    
-    role_perms = ROLE_PERMISSIONS.get(role, [])
-    
-    # Прямое совпадение
-    if perm_name in role_perms:
-        return True
-    
-    # Частичное совпадение для гибкости (например 'view_' в 'view_staffing_table')
-    for role_perm in role_perms:
-        if perm_name in role_perm or role_perm in perm_name:
+
+    try:
+        from .models import Role
+
+        # Получаем роль из БД
+        role_obj = Role.objects.filter(code=role, is_active=True).first()
+
+        if not role_obj:
+            # Роль не найдена - по умолчанию запрещаем доступ
+            return False
+
+        # Получаем права роли (с кешированием)
+        role_permissions = role_obj.get_permissions()
+
+        # Прямое совпадение
+        if perm_name in role_permissions:
             return True
-    
-    return False
+
+        # Частичное совпадение для гибкости
+        for role_perm in role_permissions:
+            if perm_name in role_perm or role_perm in perm_name:
+                return True
+
+        return False
+
+    except Exception as e:
+        # Логируем ошибку и запрещаем доступ
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error checking permission {permission} for role {role}: {e}")
+        return False
 
 
 def is_in_scope(user: User, obj: Any, permission: str) -> bool:
     """
     Проверка что объект находится в области видимости пользователя
-    
+
+    Работает с обеими системами RBAC (старой и новой).
+
     Args:
         user: Django User
         obj: проверяемый объект
         permission: название права
-    
+
     Returns:
         bool: True если объект в области видимости
     """
     role_info = user.role_info
-    role = role_info.role
+
+    # Получаем код роли (работает для обеих систем)
+    role = role_info.get_role_code()
     
     # Получить подразделение объекта
     obj_division = get_object_division(obj)
@@ -477,6 +359,8 @@ def get_user_scope_queryset(user: User, model_class):
     """
     Получить queryset с учётом области видимости пользователя для ЛЮБОЙ модели
 
+    Работает с обеими системами RBAC (старой и новой).
+
     Поддерживаемые модели:
     - Division, StaffUnit, Vacancy (прямое поле division)
     - Employee (через staff_unit__division)
@@ -495,7 +379,9 @@ def get_user_scope_queryset(user: User, model_class):
         return model_class.objects.none()
 
     role_info = user.role_info
-    role = role_info.role
+
+    # Получаем код роли (работает для обеих систем)
+    role = role_info.get_role_code()
 
     # Роли с полным доступом ко всей организации
     if role in ['ROLE_1', 'ROLE_4'] or user.is_superuser:

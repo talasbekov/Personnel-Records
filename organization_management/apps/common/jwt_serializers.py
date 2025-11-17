@@ -28,7 +28,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             role_info = user.role_info
 
             # Роль
-            token['role'] = role_info.role
+            token['role'] = role_info.get_role_code()
             token['role_name'] = role_info.get_role_display()
 
             # Область видимости (автоматически определяется)
@@ -70,10 +70,10 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
             
             # Специальные флаги для быстрой проверки на фронтенде
             token['can_edit_statuses'] = role_info.can_edit_statuses
-            token['is_admin'] = role_info.role == 'ROLE_4'
-            token['is_hr_admin'] = role_info.role == 'ROLE_5'
-            token['is_observer'] = role_info.role in ['ROLE_1', 'ROLE_2']
-            token['is_manager'] = role_info.role in ['ROLE_3', 'ROLE_6']
+            token['is_admin'] = role_info.get_role_code() == 'ROLE_4'
+            token['is_hr_admin'] = role_info.get_role_code() == 'ROLE_5'
+            token['is_observer'] = role_info.get_role_code() in ['ROLE_1', 'ROLE_2']
+            token['is_manager'] = role_info.get_role_code() in ['ROLE_3', 'ROLE_6']
         
         else:
             # У пользователя нет роли - возможно это суперпользователь
@@ -115,7 +115,7 @@ class CustomTokenObtainPairSerializer(TokenObtainPairSerializer):
         if hasattr(user, 'role_info'):
             role_info = user.role_info
             data['user']['role'] = {
-                'code': role_info.role,
+                'code': role_info.get_role_code(),
                 'name': role_info.get_role_display(),
                 'is_seconded': role_info.is_seconded,
                 'can_edit_statuses': role_info.can_edit_statuses,

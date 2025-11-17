@@ -200,9 +200,10 @@ class DivisionHeadcountSerializer(serializers.Serializer):
 
 
 class AbsenceStatisticsSerializer(serializers.Serializer):
-    """Сериализатор для статистики по отсутствиям"""
+    """Сериализатор для статистики по отсутствиям и количеству штата"""
     period = serializers.DictField()
     division_id = serializers.IntegerField(allow_null=True)
+    staff_count = serializers.IntegerField()
     total_absences = serializers.IntegerField()
     by_type = serializers.DictField()
 

@@ -14,10 +14,3 @@ class RankAdmin(admin.ModelAdmin):
     list_filter = ['level']
     ordering = ['level', 'name']
 
-admin.site.register(models.StatusType)
-admin.site.register(models.DismissalReason)
-admin.site.register(models.TransferReason)
-admin.site.register(models.VacancyReason)
-admin.site.register(models.EducationType)
-admin.site.register(models.DocumentType)
-admin.site.register(models.SystemSetting)
