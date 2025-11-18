@@ -381,7 +381,8 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
         if not user.is_superuser:
             try:
                 user_role = user.role_info  # OneToOneField
-                if not user_role or user_role.role not in ['ROLE_3', 'ROLE_6', 'ROLE_7']:
+                role_code = user_role.get_role_code() if user_role else None
+                if not role_code or role_code not in ['ROLE_3', 'ROLE_6', 'ROLE_7']:
                     return Response(
                         {'error': 'Доступ разрешен только для ROLE_3 (Начальник управления), ROLE_6 (Начальник отдела) или ROLE_7 (Начальник департамента)'},
                         status=status.HTTP_403_FORBIDDEN
@@ -450,6 +451,18 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
             # Employee с current_status
             if unit.employee:
                 current_status = unit.employee.statuses.order_by('-created_at').first()
+
+                # Если у сотрудника нет статуса, создаем дефолтный "в строю"
+                if not current_status:
+                    from django.utils import timezone
+                    current_status = EmployeeStatus.objects.create(
+                        employee=unit.employee,
+                        status_type=EmployeeStatus.StatusType.IN_SERVICE,
+                        start_date=timezone.now().date(),
+                        state=EmployeeStatus.StatusState.ACTIVE,
+                        comment='Автоматически создан при отсутствии статуса'
+                    )
+
                 unit_data['employee'] = {
                     'id': unit.employee.id,
                     'first_name': unit.employee.first_name,
@@ -494,8 +507,9 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Работа ТОЛЬКО с управлением пользователя (БЕЗ дочерних подразделений)
-        division_ids = [division.id]
+        # Работа с управлением пользователя И всеми дочерними подразделениями
+        all_divisions = division.get_descendants(include_self=True)
+        division_ids = list(all_divisions.values_list('id', flat=True))
 
         data = request.data
         updated_items = {
@@ -550,10 +564,24 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                     )
 
                     # Обновляем только разрешенные поля
-                    allowed_fields = ['first_name', 'last_name', 'middle_name', 'iin', 'rank']
+                    allowed_fields = ['first_name', 'last_name', 'middle_name', 'iin']
                     for field in allowed_fields:
                         if field in employee_data:
                             setattr(employee, field, employee_data[field])
+
+                    # Обработка rank отдельно (это ForeignKey)
+                    if 'rank' in employee_data:
+                        rank_id = employee_data['rank']
+                        if rank_id:
+                            from organization_management.apps.dictionaries.models import Rank
+                            try:
+                                rank = Rank.objects.get(id=rank_id)
+                                employee.rank = rank
+                            except Rank.DoesNotExist:
+                                errors.append({'employee': f'ID {employee_id}: Звание с ID {rank_id} не найдено'})
+                                continue
+                        else:
+                            employee.rank = None
 
                     employee.save()
                     updated_items['employees'] += 1
@@ -667,8 +695,10 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
             if not user_role:
                 return None
 
+            role_code = user_role.get_role_code()
+
             # Для ROLE_7: приоритет у scope_division если указан на уровне департамента
-            if user_role.role == 'ROLE_7':
+            if role_code == 'ROLE_7':
                 # Приоритет 1: Если scope_division указан вручную на уровне департамента (level=1)
                 if user_role.scope_division and user_role.scope_division.level == 1:
                     return user_role.scope_division
@@ -711,7 +741,7 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                     division = employee.staff_unit.division
 
                     # Для ROLE_3 (Начальник управления): поднимаемся до управления (level=2)
-                    if user_role.role == 'ROLE_3':
+                    if role_code == 'ROLE_3':
                         current = division
                         # Поднимаемся вверх пока не достигнем level=2 (управление)
                         while current and current.level > 2:
