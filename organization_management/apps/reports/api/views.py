@@ -1,10 +1,14 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, permissions
 from django.db import models
+from django.http import FileResponse
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .serializers import ReportSerializer
 from organization_management.apps.reports.models import Report
 from organization_management.apps.reports.tasks import generate_report_task
+from organization_management.apps.reports.utils import generate_personnel_expense_report
+from organization_management.apps.divisions.models import Division
+import os
 
 class ReportViewSet(viewsets.ModelViewSet):
     """
@@ -101,3 +105,73 @@ class ReportViewSet(viewsets.ModelViewSet):
             return Response({'download_url': report.file.url})
         else:
             return Response({'status': 'файл еще не готов'}, status=status.HTTP_404_NOT_FOUND)
+
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='expense/(?P<department_id>[^/.]+)',
+        permission_classes=[permissions.IsAuthenticated]
+    )
+    def expense(self, request, department_id=None):
+        """
+        Генерация отчета "Расход" по департаменту.
+        GET /api/reports/reports/expense/<department_id>/
+        """
+        user = request.user
+
+        if not department_id:
+            return Response({'detail': 'department_id обязателен'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # Проверяем существование департамента
+        try:
+            department = Division.objects.get(
+                pk=department_id,
+                division_type=Division.DivisionType.DEPARTMENT
+            )
+        except Division.DoesNotExist:
+            return Response({'detail': 'Департамент не найден'}, status=status.HTTP_404_NOT_FOUND)
+
+        # Проверка прав доступа
+        if not user.is_superuser:
+            user_division = None
+            if hasattr(user, 'role_info'):
+                user_division = user.role_info.get_user_division()
+
+            if not user_division:
+                return Response({'detail': 'Нет зоны ответственности'}, status=status.HTTP_403_FORBIDDEN)
+
+            # Проверяем, что департамент в области видимости
+            allowed = user_division.get_descendants(include_self=True)
+            if department.id not in allowed.values_list('id', flat=True):
+                return Response(
+                    {'detail': 'Департамент вне зоны ответственности'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+        # Генерируем отчет
+        try:
+            file_path = generate_personnel_expense_report(department_id)
+
+            # Проверяем существование файла
+            if os.path.exists(file_path):
+                # Получаем относительный путь от MEDIA_ROOT
+                from django.conf import settings
+                relative_path = os.path.relpath(file_path, settings.MEDIA_ROOT)
+                file_url = f"{settings.MEDIA_URL}{relative_path}"
+
+                return Response({
+                    'status': 'success',
+                    'message': 'Отчет успешно сгенерирован',
+                    'file_url': file_url,
+                    'filename': os.path.basename(file_path)
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({'detail': 'Ошибка генерации файла'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response(
+                {'detail': f'Ошибка при генерации отчета: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
