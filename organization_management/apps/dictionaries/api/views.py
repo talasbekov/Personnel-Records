@@ -1,4 +1,6 @@
 from rest_framework import viewsets, permissions
+from rest_framework.decorators import action
+from rest_framework.response import Response
 
 from organization_management.apps.dictionaries.models import (
     Position,
@@ -6,7 +8,8 @@ from organization_management.apps.dictionaries.models import (
 )
 from .serializers import (
     PositionSerializer,
-    RankSerializer
+    RankSerializer,
+    StatusTypeListSerializer
 )
 
 class PositionViewSet(viewsets.ModelViewSet):
@@ -22,3 +25,12 @@ class RankViewSet(viewsets.ModelViewSet):
     serializer_class = RankSerializer
     permission_classes = [permissions.IsAuthenticated]
     http_method_names = ['get', 'head', 'options']
+
+class StatusTypeViewSet(viewsets.ViewSet):
+    """ViewSet для справочника типов статусов (только GET)"""
+    permission_classes = [permissions.IsAuthenticated]
+
+    def list(self, request):
+        """Возвращает список всех доступных типов статусов"""
+        serializer = StatusTypeListSerializer({})
+        return Response(serializer.data)

@@ -92,7 +92,6 @@ class StaffUnit(MPTTModel):
         db_table = 'staff_units'
         verbose_name = _('Штатная единица')
         verbose_name_plural = _('Штатные единицы')
-        unique_together = ('division', 'position')
         permissions = [
             ('view_staffing_table', 'Просмотр штатного расписания'),
             ('view_staffing_table_division', 'Просмотр штатного расписания подразделения'),

@@ -395,7 +395,9 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
 
         if request.method == 'GET':
             return self._directorate_get(request, user)
-        else:  # PUT, PATCH, POST
+        elif request.method == 'POST':
+            return self._directorate_create(request, user)
+        else:  # PUT, PATCH
             return self._directorate_update(request, user)
 
     def _directorate_get(self, request, user):
@@ -491,6 +493,225 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
             'staff_units': result,
             'total_count': len(result),
         })
+
+    def _generate_personnel_number(self):
+        """Генерация уникального табельного номера"""
+        from django.db.models import Max
+
+        # Находим максимальный существующий номер
+        max_number = Employee.objects.filter(
+            personnel_number__regex=r'^\d+$'  # Только числовые номера
+        ).aggregate(
+            max_num=Max('personnel_number')
+        )['max_num']
+
+        if max_number:
+            try:
+                next_number = int(max_number) + 1
+            except (ValueError, TypeError):
+                next_number = 1
+        else:
+            next_number = 1
+
+        # Форматируем с ведущими нулями (6 цифр)
+        return str(next_number).zfill(6)
+
+    def _directorate_create(self, request, user):
+        """Создание новых штатных единиц и сотрудников"""
+        from organization_management.apps.employees.api.serializers import EmployeeSerializer
+        from organization_management.apps.statuses.api.serializers import EmployeeStatusSerializer
+        from django.utils import timezone
+        from django.core.exceptions import ValidationError
+
+        # Определяем СОБСТВЕННОЕ подразделение пользователя
+        division = self._get_user_own_division(user)
+
+        if not division:
+            return Response(
+                {'error': 'Не удалось определить подразделение пользователя'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # Работа с управлением пользователя И всеми дочерними подразделениями
+        all_divisions = division.get_descendants(include_self=True)
+        division_ids = list(all_divisions.values_list('id', flat=True))
+
+        data = request.data
+        created_items = {
+            'employees': [],
+            'staff_units': [],
+        }
+        errors = []
+
+        # 1. СПЕРВА создаем всех сотрудников
+        if 'employees' in data:
+            for employee_data in data['employees']:
+                # Для создания - не должно быть ID
+                if 'id' in employee_data:
+                    errors.append({'employee': 'При создании не нужно указывать ID сотрудника'})
+                    continue
+
+                # Используем отдельную транзакцию для каждого сотрудника
+                try:
+                    with transaction.atomic():
+                        # Генерируем уникальный табельный номер
+                        personnel_number = self._generate_personnel_number()
+
+                        # Создаем сотрудника
+                        employee = Employee(
+                            personnel_number=personnel_number,
+                            first_name=employee_data.get('first_name', ''),
+                            last_name=employee_data.get('last_name', ''),
+                            middle_name=employee_data.get('middle_name', ''),
+                            iin=employee_data.get('iin', ''),
+                        )
+
+                        # Валидация перед сохранением (проверит ИИН)
+                        employee.full_clean()
+                        employee.save()
+
+                        # Обработка rank если указан
+                        if 'rank' in employee_data and employee_data['rank']:
+                            from organization_management.apps.dictionaries.models import Rank
+                            try:
+                                rank = Rank.objects.get(id=employee_data['rank'])
+                                employee.rank = rank
+                                employee.save()
+                            except Rank.DoesNotExist:
+                                errors.append({'employee': f'Созданный ID {employee.id}: Звание с ID {employee_data["rank"]} не найдено'})
+
+                        # Автоматически создаем статус "в строю"
+                        EmployeeStatus.objects.create(
+                            employee=employee,
+                            status_type=EmployeeStatus.StatusType.IN_SERVICE,
+                            start_date=timezone.now().date(),
+                            state=EmployeeStatus.StatusState.ACTIVE,
+                            comment='Автоматически создан при создании сотрудника',
+                            created_by=user
+                        )
+
+                        # Сразу после создания сотрудника ищем его по ИИН и personnel_number
+                        # чтобы получить ID для привязки к штатной единице
+                        found_employee = Employee.objects.get(
+                            iin=employee.iin,
+                            personnel_number=employee.personnel_number
+                        )
+                        employee_id_for_staff_unit = found_employee.id
+
+                        created_items['employees'].append({
+                            'id': employee.id,
+                            'personnel_number': employee.personnel_number,
+                            'first_name': employee.first_name,
+                            'last_name': employee.last_name,
+                            'middle_name': employee.middle_name,
+                            'iin': employee.iin,
+                            '_employee_id_for_staff_unit': employee_id_for_staff_unit,  # Для внутреннего использования
+                        })
+
+                except ValidationError as ve:
+                    # Ошибка валидации - не создаём штатную единицу
+                    errors.append({'employee': f'Ошибка валидации: {ve}'})
+                except Exception as e:
+                    errors.append({'employee': f'Ошибка создания сотрудника: {str(e)}'})
+
+        # 2. ПОТОМ создаем штатные единицы и привязываем сотрудников по ИИН
+        if 'staff_units' in data:
+            for idx, staff_unit_data in enumerate(data['staff_units']):
+                # Для создания - не должно быть ID
+                if 'id' in staff_unit_data:
+                    errors.append({'staff_unit': 'При создании не нужно указывать ID штатной единицы'})
+                    continue
+
+                try:
+                    # Проверяем что подразделение в области доступа
+                    division_id = staff_unit_data.get('division')
+                    if not division_id:
+                        errors.append({'staff_unit': 'Не указано подразделение (division)'})
+                        continue
+
+                    if division_id not in division_ids:
+                        errors.append({'staff_unit': f'Подразделение {division_id} не в вашей области доступа'})
+                        continue
+
+                    position_id = staff_unit_data.get('position')
+                    if not position_id:
+                        errors.append({'staff_unit': 'Не указана должность (position)'})
+                        continue
+
+                    # Генерируем уникальный index для этой комбинации division+position
+                    from django.db.models import Max
+                    max_index = StaffUnit.objects.filter(
+                        division_id=division_id,
+                        position_id=position_id
+                    ).aggregate(max_idx=Max('index'))['max_idx']
+
+                    if max_index is not None:
+                        next_index = max_index + 1
+                    else:
+                        next_index = staff_unit_data.get('index', 1)
+
+                    # Получаем employee_id из созданных сотрудников по индексу
+                    employee_id = None
+                    if idx < len(created_items['employees']):
+                        # Берём ID сотрудника по тому же индексу
+                        employee_id = created_items['employees'][idx].get('_employee_id_for_staff_unit')
+
+                    # Если не нашли по индексу - пробуем найти по ИИН и personnel_number
+                    if not employee_id:
+                        iin = staff_unit_data.get('iin')
+                        personnel_number = staff_unit_data.get('personnel_number')
+
+                        if iin and personnel_number:
+                            # Поиск по обоим полям для точности
+                            try:
+                                found_employee = Employee.objects.get(
+                                    iin=iin,
+                                    personnel_number=personnel_number
+                                )
+                                employee_id = found_employee.id
+                            except Employee.DoesNotExist:
+                                errors.append({'staff_unit': f'Индекс {idx}: Сотрудник с ИИН {iin} и табельным номером {personnel_number} не найден'})
+                            except Employee.MultipleObjectsReturned:
+                                errors.append({'staff_unit': f'Индекс {idx}: Найдено несколько сотрудников с ИИН {iin} и табельным номером {personnel_number}'})
+                        elif iin:
+                            # Поиск только по ИИН
+                            try:
+                                found_employee = Employee.objects.get(iin=iin)
+                                employee_id = found_employee.id
+                            except Employee.DoesNotExist:
+                                errors.append({'staff_unit': f'Индекс {idx}: Сотрудник с ИИН {iin} не найден'})
+                            except Employee.MultipleObjectsReturned:
+                                errors.append({'staff_unit': f'Индекс {idx}: Найдено несколько сотрудников с ИИН {iin}'})
+
+                    # Если сотрудник не найден - пропускаем создание штатной единицы
+                    if not employee_id:
+                        errors.append({'staff_unit': f'Индекс {idx}: Не удалось найти сотрудника для привязки. Штатная единица не создана.'})
+                        continue
+
+                    # Создаем штатную единицу
+                    staff_unit = StaffUnit.objects.create(
+                        division_id=division_id,
+                        position_id=position_id,
+                        index=next_index,
+                        employee_id=employee_id  # Привязываем сотрудника по найденному ID
+                    )
+
+                    created_items['staff_units'].append({
+                        'id': staff_unit.id,
+                        'division': staff_unit.division_id,
+                        'position': staff_unit.position_id,
+                        'employee': staff_unit.employee_id,
+                        'index': staff_unit.index,
+                    })
+
+                except Exception as e:
+                    errors.append({'staff_unit': f'Ошибка создания штатной единицы: {str(e)}'})
+
+        return Response({
+            'success': True,
+            'created': created_items,
+            'errors': errors if errors else None,
+        }, status=status.HTTP_201_CREATED)
 
     @transaction.atomic
     def _directorate_update(self, request, user):
@@ -763,3 +984,161 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
 
         except Exception:
             return None
+
+
+class DivisionStatisticsViewSet(viewsets.ViewSet):
+    """
+    ViewSet для получения статистики по подразделениям в зависимости от роли пользователя.
+    Показывает количество департаментов, управлений, отделов, штатных единиц, сотрудников и вакансий.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def list(self, request):
+        """
+        Возвращает статистику по области видимости пользователя.
+        """
+        user = request.user
+
+        # Определяем область видимости пользователя
+        scope_division = self._get_user_scope_division(user)
+
+        if not scope_division:
+            return Response({
+                'detail': 'Не удалось определить область видимости пользователя'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Получаем все подразделения в области видимости (включая само подразделение)
+        divisions_in_scope = scope_division.get_descendants(include_self=True)
+        division_ids = list(divisions_in_scope.values_list('id', flat=True))
+
+        # Подсчет по типам подразделений
+        departments_count = divisions_in_scope.filter(division_type=Division.DivisionType.DEPARTMENT).count()
+        directorates_count = divisions_in_scope.filter(division_type=Division.DivisionType.DIRECTORATE).count()
+        divisions_count = divisions_in_scope.filter(division_type=Division.DivisionType.DIVISION).count()
+
+        # Подсчет штатных единиц
+        staff_units_count = StaffUnit.objects.filter(division_id__in=division_ids).count()
+
+        # Подсчет сотрудников (штатные единицы с заполненным employee)
+        employees_count = StaffUnit.objects.filter(
+            division_id__in=division_ids,
+            employee__isnull=False
+        ).count()
+
+        # Подсчет вакансий (штатные единицы без employee)
+        vacancies_count = StaffUnit.objects.filter(
+            division_id__in=division_ids,
+            employee__isnull=True
+        ).count()
+
+        # Статистика по каждому департаменту
+        departments_stats = []
+        for dept in divisions_in_scope.filter(division_type=Division.DivisionType.DEPARTMENT):
+            dept_descendants = dept.get_descendants(include_self=True)
+            dept_division_ids = list(dept_descendants.values_list('id', flat=True))
+
+            directorates_in_dept = dept_descendants.filter(division_type=Division.DivisionType.DIRECTORATE).count()
+            divisions_in_dept = dept_descendants.filter(division_type=Division.DivisionType.DIVISION).count()
+            staff_units_in_dept = StaffUnit.objects.filter(division_id__in=dept_division_ids).count()
+            employees_in_dept = StaffUnit.objects.filter(
+                division_id__in=dept_division_ids,
+                employee__isnull=False
+            ).count()
+            vacancies_in_dept = StaffUnit.objects.filter(
+                division_id__in=dept_division_ids,
+                employee__isnull=True
+            ).count()
+
+            departments_stats.append({
+                'department_id': dept.id,
+                'department_name': dept.name,
+                'directorates_count': directorates_in_dept,
+                'divisions_count': divisions_in_dept,
+                'staff_units_count': staff_units_in_dept,
+                'employees_count': employees_in_dept,
+                'vacancies_count': vacancies_in_dept,
+            })
+
+        # Статистика по управлениям
+        directorates_stats = []
+        for directorate in divisions_in_scope.filter(division_type=Division.DivisionType.DIRECTORATE):
+            dir_descendants = directorate.get_descendants(include_self=True)
+            dir_division_ids = list(dir_descendants.values_list('id', flat=True))
+
+            divisions_in_dir = dir_descendants.filter(division_type=Division.DivisionType.DIVISION).count()
+            staff_units_in_dir = StaffUnit.objects.filter(division_id__in=dir_division_ids).count()
+            employees_in_dir = StaffUnit.objects.filter(
+                division_id__in=dir_division_ids,
+                employee__isnull=False
+            ).count()
+            vacancies_in_dir = StaffUnit.objects.filter(
+                division_id__in=dir_division_ids,
+                employee__isnull=True
+            ).count()
+
+            directorates_stats.append({
+                'directorate_id': directorate.id,
+                'directorate_name': directorate.name,
+                'divisions_count': divisions_in_dir,
+                'staff_units_count': staff_units_in_dir,
+                'employees_count': employees_in_dir,
+                'vacancies_count': vacancies_in_dir,
+            })
+
+        # Статистика по отделам
+        divisions_stats = []
+        for division in divisions_in_scope.filter(division_type=Division.DivisionType.DIVISION):
+            division_descendants = division.get_descendants(include_self=True)
+            division_division_ids = list(division_descendants.values_list('id', flat=True))
+
+            staff_units_in_division = StaffUnit.objects.filter(division_id__in=division_division_ids).count()
+            employees_in_division = StaffUnit.objects.filter(
+                division_id__in=division_division_ids,
+                employee__isnull=False
+            ).count()
+            vacancies_in_division = StaffUnit.objects.filter(
+                division_id__in=division_division_ids,
+                employee__isnull=True
+            ).count()
+
+            divisions_stats.append({
+                'division_id': division.id,
+                'division_name': division.name,
+                'staff_units_count': staff_units_in_division,
+                'employees_count': employees_in_division,
+                'vacancies_count': vacancies_in_division,
+            })
+
+        return Response({
+            'scope_division': {
+                'id': scope_division.id,
+                'name': scope_division.name,
+                'division_type': scope_division.division_type,
+            },
+            'summary': {
+                'departments_count': departments_count,
+                'directorates_count': directorates_count,
+                'divisions_count': divisions_count,
+                'staff_units_count': staff_units_count,
+                'employees_count': employees_count,
+                'vacancies_count': vacancies_count,
+            },
+            'departments': departments_stats,
+            'directorates': directorates_stats,
+            'divisions': divisions_stats,
+        })
+
+    def _get_user_scope_division(self, user):
+        """Определяет область видимости пользователя"""
+        if user.is_superuser:
+            # Для суперпользователя возвращаем корневое подразделение
+            return Division.objects.filter(parent__isnull=True).first()
+
+        try:
+            if hasattr(user, 'role_info'):
+                user_role = user.role_info
+                return user_role.effective_scope_division
+        except Exception:
+            pass
+
+        return None

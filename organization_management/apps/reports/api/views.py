@@ -12,30 +12,32 @@ class ReportViewSet(viewsets.ModelViewSet):
     """
     queryset = Report.objects.all()
     serializer_class = ReportSerializer
+    http_method_names = ['get']
 
     def get_queryset(self):
         user = self.request.user
         qs = super().get_queryset()
+
         if not user.is_authenticated:
             return qs.none()
-        role = getattr(user, "role", None)
-        if role in (user.RoleType.SYSTEM_ADMIN, user.RoleType.OBSERVER_ORG):  # type: ignore[attr-defined]
+
+        # Суперпользователь видит все
+        if user.is_superuser:
             return qs
 
-        # Разрешить видеть свои отчеты и отчеты по доступной зоне ответственности (если указано division)
-        from organization_management.apps.divisions.models import Division
-        if not user.division_id:
+        # Получаем роль пользователя
+        user_division = None
+        role_code = None
+        if hasattr(user, 'role_info'):
+            user_division = user.role_info.get_user_division()
+            role_code = user.role_info.get_role_code()
+
+        # Если нет подразделения - видит только свои отчеты
+        if not user_division:
             return qs.filter(created_by_id=user.id)
 
         # Определяем доступные подразделения
-        if role == user.RoleType.HR_ADMIN:  # type: ignore[attr-defined]
-            allowed = user.division.get_descendants(include_self=True)
-        else:
-            # Роли 2/3/6 — по своему департаменту
-            node = user.division
-            while node.parent and node.division_type != Division.DivisionType.DEPARTMENT:
-                node = node.parent
-            allowed = node.get_descendants(include_self=True)
+        allowed = user_division.get_descendants(include_self=True)
 
         return qs.filter(
             models.Q(created_by_id=user.id) |
@@ -49,27 +51,30 @@ class ReportViewSet(viewsets.ModelViewSet):
         """
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
+
         # Проверка зоны ответственности для выбранного division
         division_id = serializer.validated_data.get('division')
         user = request.user
+
         if division_id:
             from organization_management.apps.divisions.models import Division
             try:
                 div = Division.objects.get(pk=division_id.id if hasattr(division_id, 'id') else division_id)
             except Division.DoesNotExist:
                 return Response({'detail': 'Некорректное подразделение'}, status=400)
-            role = getattr(user, 'role', None)
-            if role not in (user.RoleType.SYSTEM_ADMIN, user.RoleType.OBSERVER_ORG):
-                # Вычислим допустимую зону
-                if not user.division_id:
+
+            # Суперпользователь может создавать отчеты для любого подразделения
+            if not user.is_superuser:
+                # Получаем подразделение пользователя
+                user_division = None
+                if hasattr(user, 'role_info'):
+                    user_division = user.role_info.get_user_division()
+
+                if not user_division:
                     return Response({'detail': 'Нет зоны ответственности'}, status=403)
-                node = user.division
-                if role == user.RoleType.HR_ADMIN:
-                    allowed = node.get_descendants(include_self=True)
-                else:
-                    while node.parent and node.division_type != Division.DivisionType.DEPARTMENT:
-                        node = node.parent
-                    allowed = node.get_descendants(include_self=True)
+
+                # Проверяем, что запрашиваемое подразделение в области видимости
+                allowed = user_division.get_descendants(include_self=True)
                 if div.id not in allowed.values_list('id', flat=True):
                     return Response({'detail': 'Подразделение вне зоны ответственности'}, status=403)
 

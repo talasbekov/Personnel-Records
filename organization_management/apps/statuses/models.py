@@ -30,7 +30,7 @@ class EmployeeStatus(models.Model):
     # Основная информация
     employee = models.ForeignKey(
         'employees.Employee',
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         null=True,
         related_name='statuses',
         verbose_name='Сотрудник'

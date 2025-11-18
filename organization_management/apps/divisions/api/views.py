@@ -1,4 +1,3 @@
-from django.contrib.auth import get_user_model
 from rest_framework import viewsets, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -9,6 +8,27 @@ from organization_management.apps.employees.api.serializers import EmployeeSeria
 
 from django.utils import timezone
 
+
+class DivisionTreeViewSet(viewsets.ViewSet):
+    """
+    ViewSet для получения дерева подразделений.
+    Возвращает корневое подразделение со всеми детьми.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ['get']
+
+    def list(self, request):
+        """Возвращает корневое подразделение с детьми"""
+        # Получаем первое корневое подразделение (parent=None)
+        root = Division.objects.filter(parent__isnull=True).first()
+
+        if not root:
+            return Response({'detail': 'Корневое подразделение не найдено'}, status=404)
+
+        serializer = DivisionSerializer(root)
+        return Response(serializer.data)
+
+
 class DivisionViewSet(viewsets.ModelViewSet):
     """
     ViewSet для управления подразделениями.
@@ -17,48 +37,8 @@ class DivisionViewSet(viewsets.ModelViewSet):
     queryset = Division.objects.all()
     serializer_class = DivisionSerializer
 
-    def _get_department_root(self, division: Division) -> Division:
-        """Возвращает ближайший ancestor уровня департамента или корень."""
-        node = division
-        # поднимаемся, пока не найдем департамент
-        while node.parent and node.division_type != Division.DivisionType.DEPARTMENT:
-            node = node.parent
-        return node
-
-    def get_queryset(self):
-        user = self.request.user  # исправить
-        qs = super().get_queryset()
-
-        if not user.is_authenticated:
-            return qs.none()
-
-        if user.has_perm('organization_management.view_division'):
-            return qs
-
-        if not user.division_id:
-            return qs.none()
-
-        if user.has_perm('organization_management.view_division'):
-            allowed = user.division.get_descendants(include_self=True)
-        else:
-            dept_root = self._get_department_root(user.division)
-            allowed = dept_root.get_descendants(include_self=True)
-
-        return qs.filter(id__in=allowed.values_list("id", flat=True))
-
-    def get_permissions(self):
-        """
-        Определение прав доступа в зависимости от действия.
-        """
-        if self.action in ['create', 'destroy']:
-            self.permission_classes = [permissions.IsAuthenticated]
-        elif self.action in ['update', 'partial_update']:
-            self.permission_classes = [
-                permissions.IsAuthenticated,
-            ]
-        else:
-            self.permission_classes = [permissions.IsAuthenticated]
-        return super().get_permissions()
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ['get', 'head', 'options']
 
     @action(detail=True, methods=['get'])
     def employees(self, request, pk=None):

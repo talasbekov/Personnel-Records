@@ -1,5 +1,6 @@
 from django.db import models
 from django.utils import timezone
+from .validators import iin_kz_validator
 
 class Employee(models.Model):
     """Модель сотрудника"""
@@ -19,11 +20,11 @@ class Employee(models.Model):
     middle_name = models.CharField(max_length=100, blank=True)
     birth_date = models.DateField(default='1970-01-01')
     gender = models.CharField(max_length=1, choices=Gender.choices, default='M')
-    iin = models.CharField(max_length=12, null=True, blank=True)
+    iin = models.CharField(max_length=12, unique=True, null=True, blank=True, validators=[iin_kz_validator])
     photo = models.ImageField(upload_to='employees/photos/', null=True, blank=True)
 
     # Служебная информация
-    rank = models.ForeignKey('dictionaries.Rank', on_delete=models.PROTECT, null=True, blank=True)
+    rank = models.ForeignKey('dictionaries.Rank', on_delete=models.SET_NULL, null=True, blank=True)
     user = models.OneToOneField('auth.User', on_delete=models.SET_NULL, null=True, blank=True, related_name='employee')
     hire_date = models.DateField(default='1970-01-01')
     dismissal_date = models.DateField(null=True, blank=True)

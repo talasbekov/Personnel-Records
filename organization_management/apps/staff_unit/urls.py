@@ -7,6 +7,7 @@ router = DefaultRouter()
 # router.register('positions', views.PositionViewSet)
 router.register('staff-units', views.StaffUnitViewSet)
 # router.register('vacancies', views.VacancyViewSet)
+router.register('statistics', views.DivisionStatisticsViewSet, basename='division-statistics')
 
 urlpatterns = [
     path('', include(router.urls)),
