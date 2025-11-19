@@ -29,6 +29,7 @@ class RankViewSet(viewsets.ModelViewSet):
 class StatusTypeViewSet(viewsets.ViewSet):
     """ViewSet для справочника типов статусов (только GET)"""
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = StatusTypeListSerializer
 
     def list(self, request):
         """Возвращает список всех доступных типов статусов"""

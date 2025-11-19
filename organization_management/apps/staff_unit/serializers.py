@@ -15,7 +15,8 @@ class VacancySerializer(serializers.ModelSerializer):
         model = Vacancy
         fields = '__all__'
 
-class DivisionSerializer(serializers.ModelSerializer):
+class DivisionBriefSerializer(serializers.ModelSerializer):
+    """Краткий сериализатор подразделения для использования в StaffUnit"""
     class Meta:
         model = Division
         fields = ["id", "name"]
@@ -26,7 +27,8 @@ class PositionSerializer(serializers.ModelSerializer):
         model = Position
         fields = ["id", "name"]
 
-class EmployeeStatusSerializer(serializers.ModelSerializer):
+class EmployeeStatusBriefSerializer(serializers.ModelSerializer):
+    """Краткий сериализатор статуса сотрудника для использования в StaffUnit"""
     class Meta:
         model = EmployeeStatus
         fields = ("status_type", "state", "start_date", "end_date")
@@ -44,7 +46,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
             "last_name": {"required": True},
         }
 
-    @extend_schema_field(EmployeeStatusSerializer)
+    @extend_schema_field(EmployeeStatusBriefSerializer)
     def get_current_status(self, obj: Employee) -> Dict[str, Any]:
         """
         Получить текущий статус сотрудника
@@ -61,7 +63,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
             .order_by("-start_date")
             .first()
         )
-        return EmployeeStatusSerializer(status).data if status else {
+        return EmployeeStatusBriefSerializer(status).data if status else {
             "status_type": EmployeeStatus.StatusType.IN_SERVICE,
             "state": EmployeeStatus.StatusState.ACTIVE,
         }
@@ -69,7 +71,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
 
 class StaffUnitSerializer(serializers.ModelSerializer):
     # Вложенные объекты для чтения
-    division_data = DivisionSerializer(source='division', read_only=True)
+    division_data = DivisionBriefSerializer(source='division', read_only=True)
     position_data = DictionaryPositionSerializer(source='position', read_only=True)
     employee_data = EmployeeSerializer(source='employee', read_only=True)
     vacancy_data = VacancySerializer(source='vacancy', read_only=True)
@@ -174,7 +176,7 @@ class StaffUnitDetailedSerializer(serializers.ModelSerializer):
     Включает полную информацию о дочерних единицах и сотрудниках.
     """
     # Вложенные объекты для чтения
-    division = DivisionSerializer(read_only=True)
+    division = DivisionBriefSerializer(read_only=True)
     position = DictionaryPositionSerializer(read_only=True)
     employee = EmployeeSerializer(read_only=True)
     vacancy = VacancySerializer(read_only=True)
@@ -211,7 +213,7 @@ class StaffUnitDetailedSerializer(serializers.ModelSerializer):
         """Получить последние статусы сотрудника"""
         if obj.employee:
             statuses = obj.employee.statuses.order_by('-created_at')[:5]
-            return EmployeeStatusSerializer(statuses, many=True).data
+            return EmployeeStatusBriefSerializer(statuses, many=True).data
         return []
 
 

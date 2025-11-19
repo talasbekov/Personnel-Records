@@ -3,6 +3,8 @@ from django.db import models
 from django.http import FileResponse
 from rest_framework.decorators import action
 from rest_framework.response import Response
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 from .serializers import ReportSerializer
 from organization_management.apps.reports.models import Report
 from organization_management.apps.reports.tasks import generate_report_task
@@ -106,6 +108,23 @@ class ReportViewSet(viewsets.ModelViewSet):
         else:
             return Response({'status': 'файл еще не готов'}, status=status.HTTP_404_NOT_FOUND)
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='department_id',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.PATH,
+                description='ID департамента для генерации отчета'
+            )
+        ],
+        responses={
+            200: {
+                'type': 'string',
+                'format': 'binary',
+                'description': 'Excel файл отчета "Расход"'
+            }
+        }
+    )
     @action(
         detail=False,
         methods=['get'],
@@ -114,7 +133,7 @@ class ReportViewSet(viewsets.ModelViewSet):
     )
     def expense(self, request, department_id=None):
         """
-        Генерация отчета "Расход" по департаменту.
+        Генерация и скачивание отчета "Расход" по департаменту.
         GET /api/reports/reports/expense/<department_id>/
         """
         user = request.user
@@ -140,7 +159,6 @@ class ReportViewSet(viewsets.ModelViewSet):
             if not user_division:
                 return Response({'detail': 'Нет зоны ответственности'}, status=status.HTTP_403_FORBIDDEN)
 
-            # Проверяем, что департамент в области видимости
             allowed = user_division.get_descendants(include_self=True)
             if department.id not in allowed.values_list('id', flat=True):
                 return Response(
@@ -150,23 +168,15 @@ class ReportViewSet(viewsets.ModelViewSet):
 
         # Генерируем отчет
         try:
-            file_path = generate_personnel_expense_report(department_id)
+            file_buffer, filename = generate_personnel_expense_report(department_id)
 
-            # Проверяем существование файла
-            if os.path.exists(file_path):
-                # Получаем относительный путь от MEDIA_ROOT
-                from django.conf import settings
-                relative_path = os.path.relpath(file_path, settings.MEDIA_ROOT)
-                file_url = f"{settings.MEDIA_URL}{relative_path}"
-
-                return Response({
-                    'status': 'success',
-                    'message': 'Отчет успешно сгенерирован',
-                    'file_url': file_url,
-                    'filename': os.path.basename(file_path)
-                }, status=status.HTTP_200_OK)
-            else:
-                return Response({'detail': 'Ошибка генерации файла'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            response = FileResponse(
+                file_buffer,
+                as_attachment=True,
+                filename=filename,
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            return response
 
         except ValueError as e:
             return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)

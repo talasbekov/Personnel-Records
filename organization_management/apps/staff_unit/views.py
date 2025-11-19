@@ -516,6 +516,7 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
         # Форматируем с ведущими нулями (6 цифр)
         return str(next_number).zfill(6)
 
+    @transaction.atomic
     def _directorate_create(self, request, user):
         """Создание новых штатных единиц и сотрудников"""
         from organization_management.apps.employees.api.serializers import EmployeeSerializer
@@ -543,7 +544,7 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
         }
         errors = []
 
-        # 1. СПЕРВА создаем всех сотрудников
+        # 1. СПЕРВА создаем всех сотрудников с savepoint для возможного отката
         if 'employees' in data:
             for employee_data in data['employees']:
                 # Для создания - не должно быть ID
@@ -551,74 +552,102 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                     errors.append({'employee': 'При создании не нужно указывать ID сотрудника'})
                     continue
 
-                # Используем отдельную транзакцию для каждого сотрудника
+                # Создаем savepoint для возможности отката если штатка не создастся
+                sid = transaction.savepoint()
+
                 try:
-                    with transaction.atomic():
-                        # Генерируем уникальный табельный номер
-                        personnel_number = self._generate_personnel_number()
+                    # Генерируем уникальный табельный номер
+                    personnel_number = self._generate_personnel_number()
 
-                        # Создаем сотрудника
-                        employee = Employee(
-                            personnel_number=personnel_number,
-                            first_name=employee_data.get('first_name', ''),
-                            last_name=employee_data.get('last_name', ''),
-                            middle_name=employee_data.get('middle_name', ''),
-                            iin=employee_data.get('iin', ''),
-                        )
+                    # Создаем сотрудника
+                    employee = Employee(
+                        personnel_number=personnel_number,
+                        first_name=employee_data.get('first_name', ''),
+                        last_name=employee_data.get('last_name', ''),
+                        middle_name=employee_data.get('middle_name', ''),
+                        iin=employee_data.get('iin', ''),
+                    )
 
-                        # Валидация перед сохранением (проверит ИИН)
-                        employee.full_clean()
-                        employee.save()
+                    # Валидация перед сохранением (проверит ИИН)
+                    employee.full_clean()
+                    employee.save()
 
-                        # Обработка rank если указан
-                        if 'rank' in employee_data and employee_data['rank']:
-                            from organization_management.apps.dictionaries.models import Rank
-                            try:
-                                rank = Rank.objects.get(id=employee_data['rank'])
-                                employee.rank = rank
-                                employee.save()
-                            except Rank.DoesNotExist:
-                                errors.append({'employee': f'Созданный ID {employee.id}: Звание с ID {employee_data["rank"]} не найдено'})
+                    # Обработка rank если указан
+                    if 'rank' in employee_data and employee_data['rank']:
+                        from organization_management.apps.dictionaries.models import Rank
+                        try:
+                            rank = Rank.objects.get(id=employee_data['rank'])
+                            employee.rank = rank
+                            employee.save()
+                        except Rank.DoesNotExist:
+                            errors.append({'employee': f'Созданный ID {employee.id}: Звание с ID {employee_data["rank"]} не найдено'})
 
-                        # Автоматически создаем статус "в строю"
-                        EmployeeStatus.objects.create(
-                            employee=employee,
-                            status_type=EmployeeStatus.StatusType.IN_SERVICE,
-                            start_date=timezone.now().date(),
-                            state=EmployeeStatus.StatusState.ACTIVE,
-                            comment='Автоматически создан при создании сотрудника',
-                            created_by=user
-                        )
+                    # Автоматически создаем статус "в строю"
+                    EmployeeStatus.objects.create(
+                        employee=employee,
+                        status_type=EmployeeStatus.StatusType.IN_SERVICE,
+                        start_date=timezone.now().date(),
+                        state=EmployeeStatus.StatusState.ACTIVE,
+                        comment='Автоматически создан при создании сотрудника',
+                        created_by=user
+                    )
 
-                        # Сразу после создания сотрудника ищем его по ИИН и personnel_number
-                        # чтобы получить ID для привязки к штатной единице
-                        found_employee = Employee.objects.get(
-                            iin=employee.iin,
-                            personnel_number=employee.personnel_number
-                        )
-                        employee_id_for_staff_unit = found_employee.id
+                    # Сразу после создания сотрудника ищем его по ИИН и personnel_number
+                    # чтобы получить ID для привязки к штатной единице
+                    found_employee = Employee.objects.get(
+                        iin=employee.iin,
+                        personnel_number=employee.personnel_number
+                    )
+                    employee_id_for_staff_unit = found_employee.id
 
-                        created_items['employees'].append({
-                            'id': employee.id,
-                            'personnel_number': employee.personnel_number,
-                            'first_name': employee.first_name,
-                            'last_name': employee.last_name,
-                            'middle_name': employee.middle_name,
-                            'iin': employee.iin,
-                            '_employee_id_for_staff_unit': employee_id_for_staff_unit,  # Для внутреннего использования
-                        })
+                    created_items['employees'].append({
+                        'id': employee.id,
+                        'personnel_number': employee.personnel_number,
+                        'first_name': employee.first_name,
+                        'last_name': employee.last_name,
+                        'middle_name': employee.middle_name,
+                        'iin': employee.iin,
+                        '_employee_id_for_staff_unit': employee_id_for_staff_unit,
+                        '_savepoint_id': sid,  # Сохраняем savepoint для возможного отката
+                    })
+
+                    # НЕ коммитим savepoint здесь - оставляем его открытым
+                    # Он будет закоммичен автоматически при успешном создании штатной единицы
+                    # Или откачен, если штатная единица не создастся
 
                 except ValidationError as ve:
-                    # Ошибка валидации - не создаём штатную единицу
+                    # Ошибка валидации - откатываем создание сотрудника
+                    transaction.savepoint_rollback(sid)
                     errors.append({'employee': f'Ошибка валидации: {ve}'})
                 except Exception as e:
+                    # Любая ошибка - откатываем создание сотрудника
+                    transaction.savepoint_rollback(sid)
                     errors.append({'employee': f'Ошибка создания сотрудника: {str(e)}'})
+
+        # Вспомогательная функция для отката savepoint сотрудника
+        def rollback_employee_savepoint(idx):
+            """Откатывает savepoint сотрудника по индексу"""
+            if idx < len(created_items['employees']):
+                emp_data = created_items['employees'][idx]
+                savepoint_id = emp_data.get('_savepoint_id')
+                if savepoint_id:
+                    try:
+                        transaction.savepoint_rollback(savepoint_id)
+                        # Удаляем из списка созданных
+                        employee_id = emp_data.get('_employee_id_for_staff_unit')
+                        created_items['employees'] = [
+                            e for e in created_items['employees']
+                            if e.get('_employee_id_for_staff_unit') != employee_id
+                        ]
+                    except Exception:
+                        pass  # Игнорируем ошибки отката
 
         # 2. ПОТОМ создаем штатные единицы и привязываем сотрудников по ИИН
         if 'staff_units' in data:
             for idx, staff_unit_data in enumerate(data['staff_units']):
                 # Для создания - не должно быть ID
                 if 'id' in staff_unit_data:
+                    rollback_employee_savepoint(idx)
                     errors.append({'staff_unit': 'При создании не нужно указывать ID штатной единицы'})
                     continue
 
@@ -626,15 +655,18 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                     # Проверяем что подразделение в области доступа
                     division_id = staff_unit_data.get('division')
                     if not division_id:
+                        rollback_employee_savepoint(idx)
                         errors.append({'staff_unit': 'Не указано подразделение (division)'})
                         continue
 
                     if division_id not in division_ids:
+                        rollback_employee_savepoint(idx)
                         errors.append({'staff_unit': f'Подразделение {division_id} не в вашей области доступа'})
                         continue
 
                     position_id = staff_unit_data.get('position')
                     if not position_id:
+                        rollback_employee_savepoint(idx)
                         errors.append({'staff_unit': 'Не указана должность (position)'})
                         continue
 
@@ -685,15 +717,51 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
 
                     # Если сотрудник не найден - пропускаем создание штатной единицы
                     if not employee_id:
+                        rollback_employee_savepoint(idx)
                         errors.append({'staff_unit': f'Индекс {idx}: Не удалось найти сотрудника для привязки. Штатная единица не создана.'})
                         continue
+
+                    # Автоматическое определение родителя
+                    parent_unit = None
+
+                    try:
+                        # 1. Получаем объект должности для проверки уровня
+                        from organization_management.apps.dictionaries.models import Position
+                        current_position = Position.objects.get(id=position_id)
+
+                        # 2. Ищем начальника ВНУТРИ текущего подразделения
+                        # Начальник - это тот, у кого уровень должности МЕНЬШЕ (выше ранг)
+                        internal_boss = StaffUnit.objects.filter(
+                            division_id=division_id,
+                            position__level__lt=current_position.level
+                        ).order_by('position__level').first()
+
+                        if internal_boss:
+                            parent_unit = internal_boss
+                        else:
+                            # 3. Если внутри начальника нет, ищем в РОДИТЕЛЬСКОМ подразделении
+                            current_division = Division.objects.get(id=division_id)
+                            if current_division.parent:
+                                # В родительском подразделении ищем сотрудника с самым высоким рангом (min level)
+                                parent_division_boss = StaffUnit.objects.filter(
+                                    division=current_division.parent
+                                ).order_by('position__level').first()
+
+                                if parent_division_boss:
+                                    parent_unit = parent_division_boss
+
+                    except Exception as e:
+                        # Логируем ошибку определения родителя, но не прерываем создание
+                        print(f"Ошибка определения родителя: {e}")
+                        pass
 
                     # Создаем штатную единицу
                     staff_unit = StaffUnit.objects.create(
                         division_id=division_id,
                         position_id=position_id,
                         index=next_index,
-                        employee_id=employee_id  # Привязываем сотрудника по найденному ID
+                        employee_id=employee_id,  # Привязываем сотрудника по найденному ID
+                        parent_id=parent_unit.id if parent_unit else None
                     )
 
                     created_items['staff_units'].append({
@@ -704,8 +772,38 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                         'index': staff_unit.index,
                     })
 
+                    # Штатная единица успешно создана - НЕ коммитим savepoint
+                    # Он закоммитится автоматически в конце основной транзакции
+
                 except Exception as e:
-                    errors.append({'staff_unit': f'Ошибка создания штатной единицы: {str(e)}'})
+                    # Если штатная единица не создалась, откатываем создание связанного сотрудника через savepoint
+                    if employee_id:
+                        # Ищем сотрудника в списке созданных по employee_id
+                        employee_found = False
+                        for emp_data in created_items['employees']:
+                            if emp_data.get('_employee_id_for_staff_unit') == employee_id:
+                                employee_found = True
+                                # Получаем savepoint этого сотрудника и откатываем его
+                                savepoint_id = emp_data.get('_savepoint_id')
+                                if savepoint_id:
+                                    try:
+                                        transaction.savepoint_rollback(savepoint_id)
+                                        # Удаляем из списка созданных сотрудников
+                                        created_items['employees'] = [
+                                            emp for emp in created_items['employees']
+                                            if emp.get('_employee_id_for_staff_unit') != employee_id
+                                        ]
+                                        errors.append({'staff_unit': f'Индекс {idx}: Штатная единица не создана, сотрудник откачен (ID {employee_id})'})
+                                    except Exception as rollback_error:
+                                        errors.append({'staff_unit': f'Индекс {idx}: Ошибка отката сотрудника (ID {employee_id}): {str(rollback_error)}'})
+                                else:
+                                    errors.append({'staff_unit': f'Индекс {idx}: Savepoint не найден для сотрудника (ID {employee_id})'})
+                                break
+
+                        if not employee_found:
+                            errors.append({'staff_unit': f'Индекс {idx}: Сотрудник с ID {employee_id} не найден в списке созданных'})
+
+                    errors.append({'staff_unit': f'Индекс {idx}: Ошибка создания штатной единицы: {str(e)}'})
 
         return Response({
             'success': True,
@@ -992,6 +1090,7 @@ class DivisionStatisticsViewSet(viewsets.ViewSet):
     Показывает количество департаментов, управлений, отделов, штатных единиц, сотрудников и вакансий.
     """
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = None  # ViewSet возвращает статистику в виде dict
 
     def list(self, request):
         """

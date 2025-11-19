@@ -15,6 +15,7 @@ class DivisionTreeViewSet(viewsets.ViewSet):
     Возвращает корневое подразделение со всеми детьми.
     """
     permission_classes = [permissions.IsAuthenticated]
+    serializer_class = DivisionSerializer
     http_method_names = ['get']
 
     def list(self, request):
