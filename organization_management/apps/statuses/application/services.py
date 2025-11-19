@@ -62,7 +62,11 @@ class StatusApplicationService:
 
         # Автоматически завершаем текущий активный статус, если новый статус не прикомандирование
         # и текущий статус тоже не прикомандирование
-        if status_type not in [EmployeeStatus.StatusType.SECONDED_FROM, EmployeeStatus.StatusType.SECONDED_TO]:
+        # ВАЖНО: Завершаем только если новый статус уже начался (не запланированный в будущем)
+        today = timezone.now().date()
+
+        if (status_type not in [EmployeeStatus.StatusType.SECONDED_FROM, EmployeeStatus.StatusType.SECONDED_TO]
+            and start_date <= today):  # Только для статусов, которые уже начались
             current_statuses = EmployeeStatus.objects.filter(
                 employee_id=employee_id,
                 state=EmployeeStatus.StatusState.ACTIVE,
@@ -94,7 +98,10 @@ class StatusApplicationService:
             comment=comment,
             location=location,
             related_division=related_division,
-            created_by=user
+            created_by=user,
+            actual_end_date=None,  # Явно устанавливаем None при создании
+            early_termination_reason='',  # Пустая строка по умолчанию
+            state=None  # Явно None, чтобы метод save() определил состояние по датам
         )
         status.save()
 

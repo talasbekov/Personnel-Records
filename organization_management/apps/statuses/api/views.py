@@ -54,7 +54,7 @@ class EmployeeStatusViewSet(viewsets.ModelViewSet):
     queryset = EmployeeStatus.objects.all()
     serializer_class = EmployeeStatusSerializer
     permission_classes = [permissions.IsAuthenticated]
-    http_method_names = ['get', 'head', 'options']
+    http_method_names = ['get', 'post', 'patch', 'head', 'options']
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

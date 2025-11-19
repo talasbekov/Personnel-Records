@@ -1,3 +1,4 @@
+from datetime import timedelta
 from django.db import models
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -141,14 +142,14 @@ class EmployeeStatus(models.Model):
 
         # Проверка фактической даты окончания
         if self.actual_end_date:
+            # Для досрочного завершения actual_end_date может быть раньше end_date - это нормально
+            # Проверяем только что actual_end_date не раньше start_date
             if self.actual_end_date < self.start_date:
                 raise ValidationError({
                     'actual_end_date': "Фактическая дата окончания не может быть раньше даты начала."
                 })
-            if self.end_date and self.actual_end_date > self.end_date:
-                raise ValidationError({
-                    'actual_end_date': "Фактическая дата окончания не может быть позже плановой даты."
-                })
+            # Убрали проверку actual_end_date > end_date, так как при автозавершении
+            # старых статусов actual_end_date специально ставится раньше end_date
 
         # Проверка, что дата начала не раньше даты приема сотрудника
         if self.employee_id:
@@ -185,16 +186,46 @@ class EmployeeStatus(models.Model):
                                f'Текущая длительность: {vacation_duration} дней.'
                 })
 
-        # Проверка пересечений с другими активными статусами - ОТКЛЮЧЕНА
-        # Система теперь разрешает создавать пересекающиеся статусы
-        # Все изменения логируются в StatusChangeHistory
-        pass
+        # Проверка пересечений с другими активными статусами
+        # Запрещаем создавать пересекающиеся статусы для одного сотрудника
+        if self.employee_id and self.start_date:
+            # Определяем конечную дату для проверки
+            check_end_date = self.end_date or timezone.now().date() + timedelta(days=36500)  # 100 лет в будущее
+
+            # Ищем пересекающиеся активные статусы
+            overlapping = EmployeeStatus.objects.filter(
+                employee_id=self.employee_id,
+                state__in=[self.StatusState.ACTIVE, self.StatusState.PLANNED]
+            ).exclude(pk=self.pk if self.pk else None)
+
+            for other_status in overlapping:
+                # ИСКЛЮЧЕНИЕ: Разрешаем пересечение с "В строю" для запланированных статусов
+                # так как "В строю" будет автоматически завершен при активации нового статуса
+                today = timezone.now().date()
+                is_planned_status = self.start_date > today
+                is_other_in_service = other_status.status_type == self.StatusType.IN_SERVICE
+
+                if is_planned_status and is_other_in_service:
+                    # Разрешаем создавать запланированные статусы при наличии активного "В строю"
+                    continue
+
+                other_end = other_status.end_date or timezone.now().date() + timedelta(days=36500)
+
+                # Проверяем пересечение периодов
+                if not (check_end_date < other_status.start_date or self.start_date > other_end):
+                    raise ValidationError({
+                        'start_date': f'Период статуса пересекается с существующим статусом '
+                                     f'"{other_status.get_status_type_display()}" '
+                                     f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
+                                     f'Для одного сотрудника не может быть пересекающихся активных статусов.'
+                    })
 
     def save(self, *args, **kwargs):
         """Переопределенный метод сохранения"""
         # Автоматически устанавливаем состояние в зависимости от дат
         today = timezone.now().date()
 
+        # Только для новых записей или активных статусов автоматически определяем состояние
         if not self.state or self.state == self.StatusState.ACTIVE:
             if self.start_date > today:
                 self.state = self.StatusState.PLANNED

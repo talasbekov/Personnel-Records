@@ -123,6 +123,12 @@ class EmployeeStatusSerializer(serializers.ModelSerializer):
             for field in self.Meta.model._meta.fields:
                 if field.name not in attrs and hasattr(self.instance, field.name):
                     setattr(instance, field.name, getattr(self.instance, field.name))
+        else:
+            # Для нового экземпляра устанавливаем read-only поля в None
+            if not hasattr(instance, 'actual_end_date') or instance.actual_end_date is None:
+                instance.actual_end_date = None
+            if not hasattr(instance, 'early_termination_reason'):
+                instance.early_termination_reason = ''
 
         # Вызываем clean() модели для валидации
         instance.clean()
@@ -151,8 +157,26 @@ class EmployeeStatusCreateSerializer(serializers.ModelSerializer):
 
     def validate(self, attrs):
         """Валидация данных"""
-        instance = EmployeeStatus(**attrs)
-        instance.clean()
+        # Базовая валидация без создания экземпляра модели
+        # Проверка дат
+        if attrs.get('end_date') and attrs.get('start_date'):
+            if attrs['end_date'] < attrs['start_date']:
+                raise serializers.ValidationError({
+                    'end_date': 'Дата окончания не может быть раньше даты начала.'
+                })
+
+        # Статус "В строю" не должен иметь даты окончания
+        if attrs.get('status_type') == EmployeeStatus.StatusType.IN_SERVICE and attrs.get('end_date'):
+            raise serializers.ValidationError({
+                'end_date': 'Статус "В строю" не должен иметь дату окончания.'
+            })
+
+        # Остальные статусы должны иметь дату окончания
+        if attrs.get('status_type') != EmployeeStatus.StatusType.IN_SERVICE and not attrs.get('end_date'):
+            raise serializers.ValidationError({
+                'end_date': 'Для данного типа статуса требуется указать дату окончания.'
+            })
+
         return attrs
 
 

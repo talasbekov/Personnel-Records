@@ -519,8 +519,6 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
     @transaction.atomic
     def _directorate_create(self, request, user):
         """Создание новых штатных единиц и сотрудников"""
-        from organization_management.apps.employees.api.serializers import EmployeeSerializer
-        from organization_management.apps.statuses.api.serializers import EmployeeStatusSerializer
         from django.utils import timezone
         from django.core.exceptions import ValidationError
 
