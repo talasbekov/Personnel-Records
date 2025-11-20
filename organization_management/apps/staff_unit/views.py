@@ -160,8 +160,69 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
         # Используем RBAC engine для фильтрации
         return get_user_scope_queryset(user, StaffUnit)
 
-    # list() метод использует стандартную логику ModelViewSet
-    # Фильтрация по ролям происходит в get_queryset()
+    def list(self, request, *args, **kwargs):
+        """
+        Список штатных единиц с группировкой по подразделениям
+        """
+        queryset = self.filter_queryset(self.get_queryset())
+
+        # Получаем все штатные единицы
+        staff_units = queryset.select_related('division', 'position', 'employee', 'vacancy').order_by('division_id', 'index')
+
+        # Группируем по division
+        grouped_data = {}
+        for unit in staff_units:
+            division_id = unit.division_id
+
+            if division_id not in grouped_data:
+                # Первая единица этого подразделения - создаем базовую структуру
+                grouped_data[division_id] = {
+                    'id': unit.id,
+                    'division': {
+                        'id': unit.division.id,
+                        'name': unit.division.name
+                    } if unit.division else None,
+                    'index': unit.index,
+                    'parent_id': unit.parent_id,
+                    'vacancy': unit.vacancy.id if unit.vacancy else None,
+                    'employees': []
+                }
+
+            # Добавляем сотрудника/позицию в список
+            employee_data = {
+                'position': {
+                    'id': unit.position.id,
+                    'name': unit.position.name,
+                    'level': unit.position.level
+                } if unit.position else None,
+                'employee': None
+            }
+
+            if unit.employee:
+                # Получаем текущий статус сотрудника
+                current_status = EmployeeStatus.objects.filter(
+                    employee=unit.employee,
+                    state=EmployeeStatus.StatusState.ACTIVE
+                ).first()
+
+                employee_data['employee'] = {
+                    'id': unit.employee.id,
+                    'first_name': unit.employee.first_name,
+                    'last_name': unit.employee.last_name,
+                    'current_status': {
+                        'status_type': current_status.status_type,
+                        'state': current_status.state,
+                        'start_date': current_status.start_date,
+                        'end_date': current_status.end_date
+                    } if current_status else None,
+                    'rank': unit.employee.rank_id
+                }
+
+            grouped_data[division_id]['employees'].append(employee_data)
+
+        # Преобразуем в список и возвращаем
+        result = list(grouped_data.values())
+        return Response(result)
 
     def retrieve(self, request, *args, **kwargs):
         """
@@ -468,7 +529,8 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                         status_type=EmployeeStatus.StatusType.IN_SERVICE,
                         start_date=timezone.now().date(),
                         state=EmployeeStatus.StatusState.ACTIVE,
-                        comment='Автоматически создан при отсутствии статуса'
+                        comment='Автоматически создан при отсутствии статуса',
+                        created_by=user
                     )
 
                 unit_data['employee'] = {
