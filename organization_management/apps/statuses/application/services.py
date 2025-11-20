@@ -293,7 +293,12 @@ class StatusApplicationService:
         Returns:
             QuerySet: Список статусов
         """
-        queryset = EmployeeStatus.objects.filter(employee_id=employee_id)
+        queryset = EmployeeStatus.objects.filter(
+            employee_id=employee_id,
+            state__in=[
+                EmployeeStatus.StatusState.COMPLETED, EmployeeStatus.StatusState.CANCELLED
+            ]
+        ).order_by('-end_date')
 
         if status_type:
             queryset = queryset.filter(status_type=status_type)

@@ -1,3 +1,4 @@
+from django.db.models.query import Prefetch
 from rest_framework import viewsets, permissions, status
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.response import Response
@@ -427,7 +428,12 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
         ).select_related(
             'division', 'position', 'employee', 'vacancy'
         ).prefetch_related(
-            'employee__statuses'
+            Prefetch(
+                'employee__statuses',
+                queryset=EmployeeStatus.objects.filter(
+                    state=EmployeeStatus.StatusState.ACTIVE
+                ).order_by('-start_date')
+            )
         ).order_by('tree_id', 'lft')
 
         # Создаем плоский список с полной информацией (БЕЗ children)

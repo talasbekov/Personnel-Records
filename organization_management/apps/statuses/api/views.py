@@ -6,6 +6,8 @@ from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.parsers import MultiPartParser, FormParser
+from drf_spectacular.utils import extend_schema, OpenApiParameter
+from drf_spectacular.types import OpenApiTypes
 
 from django.utils import timezone
 from django.core.exceptions import ValidationError
@@ -323,40 +325,18 @@ class EmployeeStatusViewSet(viewsets.ModelViewSet):
         except ValidationError as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-    @action(detail=False, methods=['get'])
-    def current(self, request):
-        """
-        Получение текущего статуса сотрудника
-
-        Query params:
-        - employee_id (required): ID сотрудника
-        - date (optional): Дата в формате YYYY-MM-DD (по умолчанию - сегодня)
-        """
-        employee_id = request.query_params.get('employee_id')
-        date_str = request.query_params.get('date')
-
-        if not employee_id:
-            return Response(
-                {'error': 'Параметр employee_id обязателен'},
-                status=status.HTTP_400_BAD_REQUEST
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='employee_id',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description='ID сотрудника'
             )
-
-        try:
-            target_date = date.fromisoformat(date_str) if date_str else timezone.now().date()
-        except ValueError:
-            return Response(
-                {'error': 'Неверный формат даты. Используйте YYYY-MM-DD'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        status_obj = self.service.get_employee_current_status(int(employee_id))
-
-        if not status_obj:
-            return Response({}, status=status.HTTP_200_OK)
-
-        serializer = EmployeeStatusSerializer(status_obj, context={'request': request})
-        return Response(serializer.data)
-
+        ],
+        responses={200: EmployeeStatusSerializer}
+    )
     @action(detail=False, methods=['get'])
     def history(self, request):
         """
@@ -398,25 +378,54 @@ class EmployeeStatusViewSet(viewsets.ModelViewSet):
         serializer = EmployeeStatusSerializer(queryset, many=True, context={'request': request})
         return Response(serializer.data)
 
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='employee_id',
+                type=OpenApiTypes.INT,
+                location=OpenApiParameter.QUERY,
+                required=True,
+                description='ID сотрудника'
+            )
+        ],
+        responses={200: EmployeeStatusSerializer}
+    )
     @action(detail=False, methods=['get'])
     def planned(self, request):
         """
-        Получение запланированных статусов
+        Получение текущего и запланированных статусов сотрудника
 
         Query params:
-        - employee_id (optional): ID сотрудника
-        - division_id (optional): ID подразделения
+        - employee_id (required): ID сотрудника
+
+        Returns:
+        {
+            "current": {...},  # Текущий активный статус
+            "planned": [...]   # Список запланированных статусов
+        }
         """
         employee_id = request.query_params.get('employee_id')
-        division_id = request.query_params.get('division_id')
 
-        queryset = self.service.get_planned_statuses(
-            employee_id=int(employee_id) if employee_id else None,
-            division_id=int(division_id) if division_id else None
-        )
+        if not employee_id:
+            return Response(
+                {'error': 'Параметр employee_id обязателен'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
-        serializer = EmployeeStatusSerializer(queryset, many=True, context={'request': request})
-        return Response(serializer.data)
+        # Получаем текущий активный статус
+        current_status = self.service.get_employee_current_status(int(employee_id))
+
+        # Получаем запланированные статусы
+        planned_statuses = self.service.get_planned_statuses(employee_id=int(employee_id))
+
+        # Сериализуем данные
+        current_serializer = EmployeeStatusSerializer(current_status, context={'request': request}) if current_status else None
+        planned_serializer = EmployeeStatusSerializer(planned_statuses, many=True, context={'request': request})
+
+        return Response({
+            'current': current_serializer.data if current_serializer else None,
+            'planned': planned_serializer.data
+        })
 
     @action(detail=False, methods=['post'])
     def bulk_plan(self, request):
