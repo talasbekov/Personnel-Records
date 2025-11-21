@@ -108,7 +108,7 @@ class StaffUnitSerializer(serializers.ModelSerializer):
             "position", "position_data",
             "employee", "employee_data",
             "vacancy", "vacancy_data",
-            "index", "parent_id"
+            "index"
         ]
 
     def to_representation(self, instance):
@@ -147,7 +147,6 @@ class ChildStaffUnitBulkSerializer(serializers.Serializer):
     employee = serializers.IntegerField(required=False, allow_null=True)
     vacancy = serializers.IntegerField(required=False, allow_null=True)
     index = serializers.IntegerField(required=False)
-    parent_id = serializers.IntegerField(required=False, allow_null=True)
 
 
 class StaffUnitBulkUpdateSerializer(serializers.Serializer):
@@ -161,7 +160,6 @@ class StaffUnitBulkUpdateSerializer(serializers.Serializer):
     employee = serializers.IntegerField(required=False, allow_null=True)
     vacancy = serializers.IntegerField(required=False, allow_null=True)
     index = serializers.IntegerField(required=False)
-    parent_id = serializers.IntegerField(required=False, allow_null=True)
 
     # Дочерние штатные единицы
     children = ChildStaffUnitBulkSerializer(many=True, required=False)
@@ -196,17 +194,19 @@ class StaffUnitDetailedSerializer(serializers.ModelSerializer):
             "employee",
             "vacancy",
             "index",
-            "parent_id",
             "children",
             "employee_statuses"
         ]
 
     def get_children(self, obj):
-        """Получить всех дочерних с полной информацией"""
-        children = obj.get_children()
-        if children:
-            # Используем упрощенную версию для дочерних
-            return StaffUnitSerializer(children, many=True).data
+        """Получить дочерние штатные единицы из того же подразделения"""
+        # Поскольку больше нет parent, показываем другие единицы из того же подразделения
+        if obj.division:
+            children = StaffUnit.objects.filter(
+                division=obj.division
+            ).exclude(id=obj.id).order_by('position__level', 'index')
+            if children.exists():
+                return StaffUnitSerializer(children, many=True).data
         return []
 
     def get_employee_statuses(self, obj):
@@ -225,17 +225,16 @@ class DirectorateStaffUnitSerializer(StaffUnitDetailedSerializer):
 
     def get_children(self, obj):
         """
-        Получить дочерние штатные единицы ТОЛЬКО из того же подразделения.
+        Получить штатные единицы ТОЛЬКО из того же подразделения.
         Для directorate endpoint не показываем штатные единицы из дочерних подразделений.
         """
-        # Получаем всех MPTT детей
-        children = obj.get_children()
+        if obj.division:
+            # Получаем штатные единицы из того же подразделения
+            children = StaffUnit.objects.filter(
+                division=obj.division
+            ).exclude(id=obj.id).order_by('position__level', 'index')
 
-        if children:
-            # Фильтруем только тех, кто в том же division
-            children_same_division = children.filter(division=obj.division)
-            if children_same_division.exists():
-                # Рекурсивно используем тот же сериализатор
-                return DirectorateStaffUnitSerializer(children_same_division, many=True).data
+            if children.exists():
+                return DirectorateStaffUnitSerializer(children, many=True).data
 
         return []

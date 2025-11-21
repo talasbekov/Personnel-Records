@@ -166,8 +166,10 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
         """
         queryset = self.filter_queryset(self.get_queryset())
 
-        # Получаем все штатные единицы
-        staff_units = queryset.select_related('division', 'position', 'employee', 'vacancy').order_by('division_id', 'index')
+        # Получаем все штатные единицы с сортировкой по MPTT полям Division и уровню должности
+        staff_units = queryset.select_related('division', 'position', 'employee', 'vacancy').order_by(
+            'division__tree_id', 'division__lft', 'position__level', 'index'
+        )
 
         # Группируем по division
         grouped_data = {}
@@ -183,7 +185,6 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                         'name': unit.division.name
                     } if unit.division else None,
                     'index': unit.index,
-                    'parent_id': unit.parent_id,
                     'vacancy': unit.vacancy.id if unit.vacancy else None,
                     'employees': []
                 }
@@ -337,8 +338,6 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
             instance.vacancy = Vacancy.objects.get(id=data['vacancy']) if data['vacancy'] else None
         if 'index' in data:
             instance.index = data['index']
-        if 'parent_id' in data:
-            instance.parent = StaffUnit.objects.get(id=data['parent_id']) if data['parent_id'] else None
 
         instance.save()
 
@@ -368,8 +367,6 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                             child.vacancy = Vacancy.objects.get(id=child_data['vacancy']) if child_data['vacancy'] else None
                         if 'index' in child_data:
                             child.index = child_data['index']
-                        if 'parent_id' in child_data:
-                            child.parent = StaffUnit.objects.get(id=child_data['parent_id']) if child_data['parent_id'] else None
 
                         child.save()
                     except StaffUnit.DoesNotExist:
@@ -389,8 +386,7 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                         position_id=child_data.get('position'),
                         employee_id=child_data.get('employee'),
                         vacancy_id=child_data.get('vacancy'),
-                        index=child_data.get('index', 0),
-                        parent_id=child_data.get('parent_id', instance.id)
+                        index=child_data.get('index', 0)
                     )
 
         # 3. Обновляем статусы сотрудников
@@ -495,7 +491,7 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                     state=EmployeeStatus.StatusState.ACTIVE
                 ).order_by('-start_date')
             )
-        ).order_by('tree_id', 'lft')
+        ).order_by('division__tree_id', 'division__lft', 'position__level', 'index')
 
         # Создаем плоский список с полной информацией (БЕЗ children)
         result = []
@@ -514,7 +510,6 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                 'employee': None,
                 'vacancy': None,
                 'index': unit.index,
-                'parent_id': unit.parent_id,
             }
 
             # Employee с current_status

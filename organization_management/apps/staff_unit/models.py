@@ -1,6 +1,5 @@
 from django.db import models
 from django.utils.translation import gettext_lazy as _
-from mptt.models import MPTTModel, TreeForeignKey
 from organization_management.apps.divisions.models import Division
 from organization_management.apps.dictionaries.models import Position
 from organization_management.apps.employees.models import Employee
@@ -43,7 +42,7 @@ class Vacancy(models.Model):
         return f'{self.id} {self.status} ({self.requirements}) ({self.responsibilities})'
 
 
-class StaffUnit(MPTTModel):
+class StaffUnit(models.Model):
     """Конкретная штатная единица (слот) для пары division+position."""
 
     division = models.ForeignKey(
@@ -74,21 +73,11 @@ class StaffUnit(MPTTModel):
         related_name='staff_unit',
         verbose_name=_('Вакансия'),
     )
-    parent = TreeForeignKey(
-        'self',
-        on_delete=models.CASCADE,
-        null=True,
-        blank=True,
-        related_name='children'
-    )
+    category = models.CharField(max_length=10, null=True, blank=True)
     index = models.PositiveIntegerField(verbose_name=_('Номер слота'))
 
-    class MPTTMeta:
-        # Сортировка только по index для правильного порядка
-        # (division и position не используются т.к. их ID не соответствуют логическому порядку)
-        order_insertion_by = ['division', 'position']
-
     class Meta:
+        ordering = ['division__tree_id', 'division__lft', 'position__level', 'index']
         db_table = 'staff_units'
         verbose_name = _('Штатная единица')
         verbose_name_plural = _('Штатные единицы')
