@@ -3,7 +3,8 @@ from rest_framework import serializers
 from drf_spectacular.utils import extend_schema_field
 from organization_management.apps.dictionaries.models import (
     Position,
-    Rank
+    Rank,
+    Feedback
 )
 from organization_management.apps.statuses.models import EmployeeStatus
 
@@ -31,3 +32,21 @@ class StatusTypeListSerializer(serializers.Serializer):
             {"value": value, "label": label}
             for value, label in EmployeeStatus.StatusType.choices
         ]
+
+
+class FeedbackSerializer(serializers.ModelSerializer):
+    """Сериализатор для обратной связи"""
+    created_by_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = Feedback
+        fields = ['id', 'message', 'created_by', 'created_by_name', 'created_at']
+        read_only_fields = ['id', 'created_by', 'created_by_name', 'created_at']
+
+    @extend_schema_field({'type': 'string'})
+    def get_created_by_name(self, obj) -> str:
+        """Возвращает имя пользователя, создавшего обратную связь"""
+        if hasattr(obj.created_by, 'employee'):
+            employee = obj.created_by.employee
+            return f"{employee.last_name} {employee.first_name}"
+        return obj.created_by.username

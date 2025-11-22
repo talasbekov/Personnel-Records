@@ -238,3 +238,43 @@ class DirectorateStaffUnitSerializer(StaffUnitDetailedSerializer):
                 return DirectorateStaffUnitSerializer(children, many=True).data
 
         return []
+
+
+class EmployeeInDivisionSerializer(serializers.Serializer):
+    """Сериализатор для сотрудника внутри подразделения"""
+    position = DictionaryPositionSerializer(read_only=True)
+    employee = EmployeeSerializer(read_only=True)
+    vacancy = VacancySerializer(read_only=True)
+    index = serializers.IntegerField()
+
+
+class DivisionHierarchySerializer(serializers.Serializer):
+    """
+    Рекурсивный сериализатор для иерархического представления подразделений
+    с сотрудниками и дочерними подразделениями
+    """
+    id = serializers.IntegerField(source='division.id')
+    division = serializers.SerializerMethodField()
+    employees = serializers.SerializerMethodField()
+    children = serializers.SerializerMethodField()
+
+    def get_division(self, obj):
+        """Информация о подразделении"""
+        division = obj['division']
+        return {
+            'id': division.id,
+            'name': division.name,
+            'level': division.level,
+            'code': division.code
+        }
+
+    def get_employees(self, obj):
+        """Список сотрудников в этом подразделении"""
+        return obj.get('employees', [])
+
+    def get_children(self, obj):
+        """Рекурсивно получить дочерние подразделения"""
+        children_data = obj.get('children', [])
+        if children_data:
+            return DivisionHierarchySerializer(children_data, many=True).data
+        return []

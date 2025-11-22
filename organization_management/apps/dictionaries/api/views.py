@@ -4,12 +4,14 @@ from rest_framework.response import Response
 
 from organization_management.apps.dictionaries.models import (
     Position,
-    Rank
+    Rank,
+    Feedback
 )
 from .serializers import (
     PositionSerializer,
     RankSerializer,
-    StatusTypeListSerializer
+    StatusTypeListSerializer,
+    FeedbackSerializer
 )
 
 class PositionViewSet(viewsets.ModelViewSet):
@@ -35,3 +37,21 @@ class StatusTypeViewSet(viewsets.ViewSet):
         """Возвращает список всех доступных типов статусов"""
         serializer = StatusTypeListSerializer({})
         return Response(serializer.data)
+
+
+class FeedbackViewSet(viewsets.ModelViewSet):
+    """ViewSet для обратной связи - GET и POST"""
+    queryset = Feedback.objects.all()
+    serializer_class = FeedbackSerializer
+    permission_classes = [permissions.IsAuthenticated]
+    http_method_names = ['get', 'post', 'head', 'options']
+
+    def get_queryset(self):
+        """
+        Все пользователи видят все сообщения обратной связи.
+        """
+        return Feedback.objects.all()
+
+    def perform_create(self, serializer):
+        """Автоматически устанавливаем текущего пользователя как создателя"""
+        serializer.save(created_by=self.request.user)

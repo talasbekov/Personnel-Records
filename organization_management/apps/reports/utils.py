@@ -2,8 +2,10 @@
 Утилиты для генерации отчетов
 """
 import os
+import logging
 from datetime import datetime
 from io import BytesIO
+from django.db.models import Q
 
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
@@ -13,6 +15,74 @@ from organization_management.apps.divisions.models import Division
 from organization_management.apps.staff_unit.models import StaffUnit
 from organization_management.apps.employees.models import Employee
 from organization_management.apps.statuses.models import EmployeeStatus
+
+logger = logging.getLogger(__name__)
+
+
+def get_active_status_filter(report_date):
+    """
+    Возвращает Q-фильтр для получения статусов, активных или запланированных на указанную дату.
+
+    Статус считается активным/запланированным на дату, если:
+    - start_date <= report_date
+    - end_date >= report_date ИЛИ end_date is None
+    - state = ACTIVE или PLANNED
+
+    Args:
+        report_date: Дата для проверки
+
+    Returns:
+        Q: Django Q-объект для фильтрации
+    """
+    return Q(
+        start_date__lte=report_date,
+        state__in=[EmployeeStatus.StatusState.ACTIVE, EmployeeStatus.StatusState.PLANNED]
+    ) & (
+        Q(end_date__gte=report_date) | Q(end_date__isnull=True)
+    )
+
+
+def get_employee_status_on_date(employee, report_date, status_type):
+    """
+    Получает статус сотрудника на указанную дату.
+    Если нет активного статуса указанного типа на эту дату, возвращает None.
+
+    Args:
+        employee: Объект сотрудника
+        report_date: Дата для проверки
+        status_type: Тип статуса для поиска
+
+    Returns:
+        EmployeeStatus или None
+    """
+    status_filter = get_active_status_filter(report_date)
+    return EmployeeStatus.objects.filter(
+        employee=employee,
+        status_type=status_type
+    ).filter(status_filter).first()
+
+
+def get_employees_by_status_on_date(division_ids, report_date, status_types):
+    """
+    Получает список сотрудников с указанными типами статусов на дату.
+
+    Args:
+        division_ids: ID подразделений
+        report_date: Дата для проверки
+        status_types: Список типов статусов (может быть одним значением или списком)
+
+    Returns:
+        QuerySet EmployeeStatus
+    """
+    status_filter = get_active_status_filter(report_date)
+
+    if not isinstance(status_types, list):
+        status_types = [status_types]
+
+    return EmployeeStatus.objects.filter(
+        employee__staff_unit__division_id__in=division_ids if isinstance(division_ids, list) else [division_ids],
+        status_type__in=status_types
+    ).filter(status_filter).select_related('employee', 'related_division')
 
 
 def safe_set_cell_value(ws, row, col, value):
@@ -32,31 +102,45 @@ def safe_set_cell_value(ws, row, col, value):
                 min_col = merged_range.min_col
                 # Записываем значение в первую ячейку
                 ws.cell(row=min_row, column=min_col).value = value
+                logger.debug(f"Set merged cell ({row},{col}) -> ({min_row},{min_col}) = {value}")
                 return
+        # Если диапазон не найден, логируем предупреждение
+        logger.warning(f"MergedCell at ({row},{col}) not found in merged_ranges, trying direct write")
+        # Пытаемся записать напрямую
+        try:
+            ws.cell(row=row, column=col).value = value
+        except:
+            logger.error(f"Failed to write value {value} to cell ({row},{col})")
     else:
         # Обычная ячейка - просто записываем значение
         cell.value = value
+        logger.debug(f"Set cell ({row},{col}) = {value}")
 
 
-def generate_personnel_expense_report(department_id):
+def generate_personnel_expense_report(department_id, report_date=None):
     """
-    Генерирует отчет "Расход" по департаменту в памяти.
+    Генерирует отчет "Расход" по департаменту в памяти (динамически без шаблона).
 
     Args:
         department_id: ID департамента
+        report_date: Дата для определения статусов сотрудников (datetime.date).
+                     Если None, используется текущая дата.
 
     Returns:
         tuple: (BytesIO объект с Excel файлом, имя файла)
     """
-    # Путь к шаблону
-    template_path = os.path.join(
-        settings.BASE_DIR,
-        'apps/reports/расход.xlsx'
-    )
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 
-    # Загружаем шаблон
-    wb = load_workbook(template_path)
+    # Если дата не указана, используем текущую
+    if report_date is None:
+        from datetime import date
+        report_date = date.today()
+
+    # Создаем новый Excel файл
+    wb = Workbook()
     ws = wb.active
+    ws.title = "Расход"
 
     # Получаем департамент
     try:
@@ -66,16 +150,71 @@ def generate_personnel_expense_report(department_id):
 
     heads = Division.objects.filter(division_type=Division.DivisionType.DEPARTMENT, is_active=True).order_by('name')
 
-    # Получаем все управления в департаменте
-    directorates = Division.objects.filter(
-        parent=department,
-        division_type=Division.DivisionType.DIRECTORATE,
+    # Получаем все управления в департаменте (level=2)
+    all_descendants = department.get_descendants(include_self=False)
+    directorates = all_descendants.filter(
+        level=2,
         is_active=True
     ).order_by('name')
 
-    # Начальная строка для данных
-    start_row = 6
-    current_row = start_row
+    # Стили для ячеек
+    header_font = Font(bold=True, size=11)
+    center_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    # Светло-серый цвет для заголовков и итоговой строки
+    gray_fill = PatternFill(start_color='D3D3D3', end_color='D3D3D3', fill_type='solid')
+
+    # СТРОКА 1: Название департамента
+    ws.merge_cells('A1:M1')
+    cell = ws['A1']
+    cell.value = f"Расход личного состава за {department.name} на {report_date.strftime('%d.%m.%Y')}"
+    cell.font = Font(bold=True, size=14)
+    cell.alignment = center_alignment
+
+    # СТРОКА 2: Пустая строка для отступа
+
+    # СТРОКА 3: Заголовки таблицы
+    headers = [
+        'Подразделение',
+        'Штат',
+        'Списочный состав',
+        'В строю',
+        'Вакансии',
+        'Отпуск',
+        'Командировка',
+        'Больничный',
+        'На дежурстве',
+        'После дежурства',
+        'На учебе',
+        'Прикомандирован',
+        'Откомандирован'
+    ]
+
+    for col_num, header in enumerate(headers, start=1):
+        cell = ws.cell(row=3, column=col_num)
+        cell.value = header
+        cell.font = header_font
+        cell.alignment = center_alignment
+        cell.border = border
+        cell.fill = gray_fill  # Светло-серый цвет
+
+    # Устанавливаем ширину столбцов (в Excel 1 единица ширины ≈ 0.18 см)
+    # A = 8 см ≈ 44 единиц
+    # B, C, D, E = 2.5 см ≈ 14 единиц
+    # F-M = 5 см ≈ 28 единиц
+    ws.column_dimensions['A'].width = 44
+    for col in ['B', 'C', 'D', 'E']:
+        ws.column_dimensions[col].width = 14
+    for col in ['F', 'G', 'H', 'I', 'J', 'K', 'L', 'M']:
+        ws.column_dimensions[col].width = 28
+
+    # Начальная строка для данных (строка 4 - Руководство)
+    current_row = 4
 
     # Итоговые счетчики
     total_staff_units = 0
@@ -91,9 +230,7 @@ def generate_personnel_expense_report(department_id):
     total_seconded_from = 0
     total_seconded_to = 0
 
-    # === ОБРАБОТКА РУКОВОДСТВА ДЕПАРТАМЕНТА (строки 4-5) ===
-    head_row = 4
-
+    # === ОБРАБОТКА РУКОВОДСТВА ДЕПАРТАМЕНТА ===
     # Получаем сотрудников, напрямую относящихся к департаменту (не к управлениям)
     head_division_ids = [department.id]
 
@@ -106,12 +243,18 @@ def generate_personnel_expense_report(department_id):
         employee__isnull=False
     ).count()
 
-    # Количество "в строю"
-    head_in_service = EmployeeStatus.objects.filter(
-        employee__staff_unit__division_id=department.id,
-        status_type=EmployeeStatus.StatusType.IN_SERVICE,
-        state=EmployeeStatus.StatusState.ACTIVE
-    ).count()
+    # Получаем фильтр для активных статусов на дату
+    status_filter = get_active_status_filter(report_date)
+
+    # Получаем сотрудников с любыми статусами кроме "в строю" на эту дату
+    employees_with_other_statuses = EmployeeStatus.objects.filter(
+        employee__staff_unit__division_id=department.id
+    ).filter(status_filter).exclude(
+        status_type=EmployeeStatus.StatusType.IN_SERVICE
+    ).values_list('employee_id', flat=True).distinct()
+
+    # "В строю" = Все сотрудники - Сотрудники с другими статусами
+    head_in_service = head_employees - len(employees_with_other_statuses)
 
     # Вакансии руководства
     head_vacancies = StaffUnit.objects.filter(
@@ -120,12 +263,11 @@ def generate_personnel_expense_report(department_id):
     ).count()
 
     # Отпуск руководства
-    head_vacation_statuses = EmployeeStatus.objects.filter(
-        employee__staff_unit__division_id=department.id,
-        status_type__in=[EmployeeStatus.StatusType.VACATION, EmployeeStatus.StatusType.LEAVE_BY_REPORT],
-        state=EmployeeStatus.StatusState.ACTIVE
-    ).select_related('employee')
-
+    head_vacation_statuses = get_employees_by_status_on_date(
+        department.id,
+        report_date,
+        [EmployeeStatus.StatusType.VACATION, EmployeeStatus.StatusType.LEAVE_BY_REPORT]
+    )
     head_vacation_count = head_vacation_statuses.count()
     head_vacation_list = []
     for status in head_vacation_statuses:
@@ -134,12 +276,11 @@ def generate_personnel_expense_report(department_id):
         head_vacation_list.append(f"{emp.last_name} {emp.first_name} ({period})")
 
     # Командировка руководства
-    head_trip_statuses = EmployeeStatus.objects.filter(
-        employee__staff_unit__division_id=department.id,
-        status_type=EmployeeStatus.StatusType.BUSINESS_TRIP,
-        state=EmployeeStatus.StatusState.ACTIVE
-    ).select_related('employee')
-
+    head_trip_statuses = get_employees_by_status_on_date(
+        department.id,
+        report_date,
+        EmployeeStatus.StatusType.BUSINESS_TRIP
+    )
     head_trip_count = head_trip_statuses.count()
     head_trip_list = []
     for status in head_trip_statuses:
@@ -148,12 +289,11 @@ def generate_personnel_expense_report(department_id):
         head_trip_list.append(f"{emp.last_name} {emp.first_name} ({period})")
 
     # Больничный руководства
-    head_sick_statuses = EmployeeStatus.objects.filter(
-        employee__staff_unit__division_id=department.id,
-        status_type=EmployeeStatus.StatusType.SICK_LEAVE,
-        state=EmployeeStatus.StatusState.ACTIVE
-    ).select_related('employee')
-
+    head_sick_statuses = get_employees_by_status_on_date(
+        department.id,
+        report_date,
+        EmployeeStatus.StatusType.SICK_LEAVE
+    )
     head_sick_count = head_sick_statuses.count()
     head_sick_list = []
     for status in head_sick_statuses:
@@ -162,32 +302,29 @@ def generate_personnel_expense_report(department_id):
         head_sick_list.append(f"{emp.last_name} {emp.first_name} ({period})")
 
     # На дежурстве руководства
-    head_on_duty_statuses = EmployeeStatus.objects.filter(
-        employee__staff_unit__division_id=department.id,
-        status_type=EmployeeStatus.StatusType.ON_DUTY,
-        state=EmployeeStatus.StatusState.ACTIVE
-    ).select_related('employee')
-
+    head_on_duty_statuses = get_employees_by_status_on_date(
+        department.id,
+        report_date,
+        EmployeeStatus.StatusType.ON_DUTY
+    )
     head_on_duty_count = head_on_duty_statuses.count()
     head_on_duty_list = [f"{s.employee.last_name} {s.employee.first_name}" for s in head_on_duty_statuses]
 
     # После дежурства руководства
-    head_after_duty_statuses = EmployeeStatus.objects.filter(
-        employee__staff_unit__division_id=department.id,
-        status_type=EmployeeStatus.StatusType.AFTER_DUTY,
-        state=EmployeeStatus.StatusState.ACTIVE
-    ).select_related('employee')
-
+    head_after_duty_statuses = get_employees_by_status_on_date(
+        department.id,
+        report_date,
+        EmployeeStatus.StatusType.AFTER_DUTY
+    )
     head_after_duty_count = head_after_duty_statuses.count()
     head_after_duty_list = [f"{s.employee.last_name} {s.employee.first_name}" for s in head_after_duty_statuses]
 
     # На учебе руководства
-    head_training_statuses = EmployeeStatus.objects.filter(
-        employee__staff_unit__division_id=department.id,
-        status_type__in=[EmployeeStatus.StatusType.TRAINING, EmployeeStatus.StatusType.COMPETITION],
-        state=EmployeeStatus.StatusState.ACTIVE
-    ).select_related('employee')
-
+    head_training_statuses = get_employees_by_status_on_date(
+        department.id,
+        report_date,
+        [EmployeeStatus.StatusType.TRAINING, EmployeeStatus.StatusType.COMPETITION]
+    )
     head_training_count = head_training_statuses.count()
     head_training_list = []
     for status in head_training_statuses:
@@ -196,12 +333,11 @@ def generate_personnel_expense_report(department_id):
         head_training_list.append(f"{emp.last_name} {emp.first_name} ({period})")
 
     # Прикомандирован руководства
-    head_seconded_from_statuses = EmployeeStatus.objects.filter(
-        employee__staff_unit__division_id=department.id,
-        status_type=EmployeeStatus.StatusType.SECONDED_FROM,
-        state=EmployeeStatus.StatusState.ACTIVE
-    ).select_related('employee')
-
+    head_seconded_from_statuses = get_employees_by_status_on_date(
+        department.id,
+        report_date,
+        EmployeeStatus.StatusType.SECONDED_FROM
+    )
     head_seconded_from_count = head_seconded_from_statuses.count()
     head_seconded_from_list = []
     for status in head_seconded_from_statuses:
@@ -211,12 +347,11 @@ def generate_personnel_expense_report(department_id):
         head_seconded_from_list.append(f"{emp.last_name} {emp.first_name} ({period}, из {from_div})")
 
     # Откомандирован руководства
-    head_seconded_to_statuses = EmployeeStatus.objects.filter(
-        employee__staff_unit__division_id=department.id,
-        status_type=EmployeeStatus.StatusType.SECONDED_TO,
-        state=EmployeeStatus.StatusState.ACTIVE
-    ).select_related('employee')
-
+    head_seconded_to_statuses = get_employees_by_status_on_date(
+        department.id,
+        report_date,
+        EmployeeStatus.StatusType.SECONDED_TO
+    )
     head_seconded_to_count = head_seconded_to_statuses.count()
     head_seconded_to_list = []
     for status in head_seconded_to_statuses:
@@ -226,29 +361,65 @@ def generate_personnel_expense_report(department_id):
         head_seconded_to_list.append(f"{emp.last_name} {emp.first_name} ({period}, в {to_div})")
 
     # СТРОКА 4: Руководство - Название + Числа
-    safe_set_cell_value(ws, head_row, 1, "Басшылық")  # "Руководство"
-    safe_set_cell_value(ws, head_row, 2, head_staff_units)
-    safe_set_cell_value(ws, head_row, 3, head_employees)
-    safe_set_cell_value(ws, head_row, 4, head_in_service)
-    safe_set_cell_value(ws, head_row, 5, head_vacancies)
-    safe_set_cell_value(ws, head_row, 6, head_vacation_count)
-    safe_set_cell_value(ws, head_row, 7, head_trip_count)
-    safe_set_cell_value(ws, head_row, 8, head_sick_count)
-    safe_set_cell_value(ws, head_row, 9, head_on_duty_count)
-    safe_set_cell_value(ws, head_row, 10, head_after_duty_count)
-    safe_set_cell_value(ws, head_row, 11, head_training_count)
-    safe_set_cell_value(ws, head_row, 12, head_seconded_from_count)
-    safe_set_cell_value(ws, head_row, 13, head_seconded_to_count)
+    head_start_row = current_row
+
+    row_data = [
+        "Басшылық",  # "Руководство"
+        head_staff_units,
+        head_employees,
+        head_in_service,
+        head_vacancies,
+        head_vacation_count,
+        head_trip_count,
+        head_sick_count,
+        head_on_duty_count,
+        head_after_duty_count,
+        head_training_count,
+        head_seconded_from_count,
+        head_seconded_to_count
+    ]
+
+    for col_num, value in enumerate(row_data, start=1):
+        cell = ws.cell(row=current_row, column=col_num)
+        cell.value = value
+        cell.border = border
+        cell.alignment = Alignment(horizontal='left' if col_num == 1 else 'center', vertical='center')
 
     # СТРОКА 5: Руководство - Подробности ФИО
-    safe_set_cell_value(ws, head_row + 1, 6, "; ".join(head_vacation_list) if head_vacation_list else "")
-    safe_set_cell_value(ws, head_row + 1, 7, "; ".join(head_trip_list) if head_trip_list else "")
-    safe_set_cell_value(ws, head_row + 1, 8, "; ".join(head_sick_list) if head_sick_list else "")
-    safe_set_cell_value(ws, head_row + 1, 9, "; ".join(head_on_duty_list) if head_on_duty_list else "")
-    safe_set_cell_value(ws, head_row + 1, 10, "; ".join(head_after_duty_list) if head_after_duty_list else "")
-    safe_set_cell_value(ws, head_row + 1, 11, "; ".join(head_training_list) if head_training_list else "")
-    safe_set_cell_value(ws, head_row + 1, 12, "; ".join(head_seconded_from_list) if head_seconded_from_list else "")
-    safe_set_cell_value(ws, head_row + 1, 13, "; ".join(head_seconded_to_list) if head_seconded_to_list else "")
+    current_row += 1
+
+    detail_data = {
+        2: "",  # Пустые колонки B-E
+        3: "",
+        4: "",
+        5: "",
+        6: "; ".join(head_vacation_list) if head_vacation_list else "",
+        7: "; ".join(head_trip_list) if head_trip_list else "",
+        8: "; ".join(head_sick_list) if head_sick_list else "",
+        9: "; ".join(head_on_duty_list) if head_on_duty_list else "",
+        10: "; ".join(head_after_duty_list) if head_after_duty_list else "",
+        11: "; ".join(head_training_list) if head_training_list else "",
+        12: "; ".join(head_seconded_from_list) if head_seconded_from_list else "",
+        13: "; ".join(head_seconded_to_list) if head_seconded_to_list else ""
+    }
+
+    for col_num, value in detail_data.items():
+        cell = ws.cell(row=current_row, column=col_num)
+        cell.value = value
+        cell.border = border
+        cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+        cell.font = Font(size=9)
+
+    # Устанавливаем высоту строки с деталями (4 см ≈ 113 пунктов)
+    ws.row_dimensions[current_row].height = 113
+
+    # Объединяем ячейки A, B, C, D, E по вертикали (строки 4 и 5)
+    for col in range(1, 6):  # Колонки A-E (1-5)
+        ws.merge_cells(start_row=head_start_row, start_column=col, end_row=current_row, end_column=col)
+        cell = ws.cell(row=head_start_row, column=col)
+        cell.alignment = Alignment(horizontal='left' if col == 1 else 'center', vertical='center')
+        if col == 1:
+            cell.font = Font(bold=True)
 
     # Добавляем руководство к итоговым счетчикам
     total_staff_units += head_staff_units
@@ -283,12 +454,15 @@ def generate_personnel_expense_report(department_id):
         ).count()
         total_employees += employees_count
 
-        # Количество сотрудников "в строю"
-        in_service_count = EmployeeStatus.objects.filter(
-            employee__staff_unit__division_id__in=directorate_division_ids,
-            status_type=EmployeeStatus.StatusType.IN_SERVICE,
-            state=EmployeeStatus.StatusState.ACTIVE
-        ).count()
+        # Получаем сотрудников с любыми статусами кроме "в строю" на эту дату
+        dir_employees_with_other_statuses = EmployeeStatus.objects.filter(
+            employee__staff_unit__division_id__in=directorate_division_ids
+        ).filter(status_filter).exclude(
+            status_type=EmployeeStatus.StatusType.IN_SERVICE
+        ).values_list('employee_id', flat=True).distinct()
+
+        # "В строю" = Все сотрудники - Сотрудники с другими статусами
+        in_service_count = employees_count - len(dir_employees_with_other_statuses)
         total_in_service += in_service_count
 
         # Количество вакансий
@@ -299,12 +473,11 @@ def generate_personnel_expense_report(department_id):
         total_vacancies += vacancies_count
 
         # Отпуск
-        vacation_statuses = EmployeeStatus.objects.filter(
-            employee__staff_unit__division_id__in=directorate_division_ids,
-            status_type__in=[EmployeeStatus.StatusType.VACATION, EmployeeStatus.StatusType.LEAVE_BY_REPORT],
-            state=EmployeeStatus.StatusState.ACTIVE
-        ).select_related('employee')
-
+        vacation_statuses = get_employees_by_status_on_date(
+            directorate_division_ids,
+            report_date,
+            [EmployeeStatus.StatusType.VACATION, EmployeeStatus.StatusType.LEAVE_BY_REPORT]
+        )
         vacation_count = vacation_statuses.count()
         vacation_list = []
         for status in vacation_statuses:
@@ -314,12 +487,11 @@ def generate_personnel_expense_report(department_id):
         total_vacation += vacation_count
 
         # Командировка
-        trip_statuses = EmployeeStatus.objects.filter(
-            employee__staff_unit__division_id__in=directorate_division_ids,
-            status_type=EmployeeStatus.StatusType.BUSINESS_TRIP,
-            state=EmployeeStatus.StatusState.ACTIVE
-        ).select_related('employee')
-
+        trip_statuses = get_employees_by_status_on_date(
+            directorate_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.BUSINESS_TRIP
+        )
         trip_count = trip_statuses.count()
         trip_list = []
         for status in trip_statuses:
@@ -329,12 +501,11 @@ def generate_personnel_expense_report(department_id):
         total_business_trip += trip_count
 
         # Больничный
-        sick_statuses = EmployeeStatus.objects.filter(
-            employee__staff_unit__division_id__in=directorate_division_ids,
-            status_type=EmployeeStatus.StatusType.SICK_LEAVE,
-            state=EmployeeStatus.StatusState.ACTIVE
-        ).select_related('employee')
-
+        sick_statuses = get_employees_by_status_on_date(
+            directorate_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.SICK_LEAVE
+        )
         sick_count = sick_statuses.count()
         sick_list = []
         for status in sick_statuses:
@@ -344,34 +515,31 @@ def generate_personnel_expense_report(department_id):
         total_sick += sick_count
 
         # На дежурстве
-        on_duty_statuses = EmployeeStatus.objects.filter(
-            employee__staff_unit__division_id__in=directorate_division_ids,
-            status_type=EmployeeStatus.StatusType.ON_DUTY,
-            state=EmployeeStatus.StatusState.ACTIVE
-        ).select_related('employee')
-
+        on_duty_statuses = get_employees_by_status_on_date(
+            directorate_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.ON_DUTY
+        )
         on_duty_count = on_duty_statuses.count()
         on_duty_list = [f"{s.employee.last_name} {s.employee.first_name}" for s in on_duty_statuses]
         total_on_duty += on_duty_count
 
         # После дежурства
-        after_duty_statuses = EmployeeStatus.objects.filter(
-            employee__staff_unit__division_id__in=directorate_division_ids,
-            status_type=EmployeeStatus.StatusType.AFTER_DUTY,
-            state=EmployeeStatus.StatusState.ACTIVE
-        ).select_related('employee')
-
+        after_duty_statuses = get_employees_by_status_on_date(
+            directorate_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.AFTER_DUTY
+        )
         after_duty_count = after_duty_statuses.count()
         after_duty_list = [f"{s.employee.last_name} {s.employee.first_name}" for s in after_duty_statuses]
         total_after_duty += after_duty_count
 
         # На учебе/соревнованиях
-        training_statuses = EmployeeStatus.objects.filter(
-            employee__staff_unit__division_id__in=directorate_division_ids,
-            status_type__in=[EmployeeStatus.StatusType.TRAINING, EmployeeStatus.StatusType.COMPETITION],
-            state=EmployeeStatus.StatusState.ACTIVE
-        ).select_related('employee')
-
+        training_statuses = get_employees_by_status_on_date(
+            directorate_division_ids,
+            report_date,
+            [EmployeeStatus.StatusType.TRAINING, EmployeeStatus.StatusType.COMPETITION]
+        )
         training_count = training_statuses.count()
         training_list = []
         for status in training_statuses:
@@ -381,12 +549,11 @@ def generate_personnel_expense_report(department_id):
         total_training += training_count
 
         # Прикомандирован
-        seconded_from_statuses = EmployeeStatus.objects.filter(
-            employee__staff_unit__division_id__in=directorate_division_ids,
-            status_type=EmployeeStatus.StatusType.SECONDED_FROM,
-            state=EmployeeStatus.StatusState.ACTIVE
-        ).select_related('employee')
-
+        seconded_from_statuses = get_employees_by_status_on_date(
+            directorate_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.SECONDED_FROM
+        )
         seconded_from_count = seconded_from_statuses.count()
         seconded_from_list = []
         for status in seconded_from_statuses:
@@ -397,12 +564,11 @@ def generate_personnel_expense_report(department_id):
         total_seconded_from += seconded_from_count
 
         # Откомандирован
-        seconded_to_statuses = EmployeeStatus.objects.filter(
-            employee__staff_unit__division_id__in=directorate_division_ids,
-            status_type=EmployeeStatus.StatusType.SECONDED_TO,
-            state=EmployeeStatus.StatusState.ACTIVE
-        ).select_related('employee')
-
+        seconded_to_statuses = get_employees_by_status_on_date(
+            directorate_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.SECONDED_TO
+        )
         seconded_to_count = seconded_to_statuses.count()
         seconded_to_list = []
         for status in seconded_to_statuses:
@@ -412,54 +578,102 @@ def generate_personnel_expense_report(department_id):
             seconded_to_list.append(f"{emp.last_name} {emp.first_name} ({period}, в {to_div})")
         total_seconded_to += seconded_to_count
 
-        # СТРОКА 1: Название + Числа
-        safe_set_cell_value(ws, current_row, 1, directorate.name)
-        safe_set_cell_value(ws, current_row, 2, staff_units_count)
-        safe_set_cell_value(ws, current_row, 3, employees_count)
-        safe_set_cell_value(ws, current_row, 4, in_service_count)
-        safe_set_cell_value(ws, current_row, 5, vacancies_count)
-        safe_set_cell_value(ws, current_row, 6, vacation_count)
-        safe_set_cell_value(ws, current_row, 7, trip_count)
-        safe_set_cell_value(ws, current_row, 8, sick_count)
-        safe_set_cell_value(ws, current_row, 9, on_duty_count)
-        safe_set_cell_value(ws, current_row, 10, after_duty_count)
-        safe_set_cell_value(ws, current_row, 11, training_count)
-        safe_set_cell_value(ws, current_row, 12, seconded_from_count)
-        safe_set_cell_value(ws, current_row, 13, seconded_to_count)
-
-        # СТРОКА 2: Подробности ФИО
+        # СТРОКА: Управление - Название + Числа
         current_row += 1
-        safe_set_cell_value(ws, current_row, 6, "; ".join(vacation_list) if vacation_list else "")
-        safe_set_cell_value(ws, current_row, 7, "; ".join(trip_list) if trip_list else "")
-        safe_set_cell_value(ws, current_row, 8, "; ".join(sick_list) if sick_list else "")
-        safe_set_cell_value(ws, current_row, 9, "; ".join(on_duty_list) if on_duty_list else "")
-        safe_set_cell_value(ws, current_row, 10, "; ".join(after_duty_list) if after_duty_list else "")
-        safe_set_cell_value(ws, current_row, 11, "; ".join(training_list) if training_list else "")
-        safe_set_cell_value(ws, current_row, 12, "; ".join(seconded_from_list) if seconded_from_list else "")
-        safe_set_cell_value(ws, current_row, 13, "; ".join(seconded_to_list) if seconded_to_list else "")
+        dir_start_row = current_row
 
+        row_data = [
+            directorate.name,
+            staff_units_count,
+            employees_count,
+            in_service_count,
+            vacancies_count,
+            vacation_count,
+            trip_count,
+            sick_count,
+            on_duty_count,
+            after_duty_count,
+            training_count,
+            seconded_from_count,
+            seconded_to_count
+        ]
+
+        for col_num, value in enumerate(row_data, start=1):
+            cell = ws.cell(row=current_row, column=col_num)
+            cell.value = value
+            cell.border = border
+            cell.alignment = Alignment(horizontal='left' if col_num == 1 else 'center', vertical='center')
+
+        # СТРОКА: Подробности ФИО
         current_row += 1
+
+        detail_data = {
+            2: "",  # Пустые колонки B-E
+            3: "",
+            4: "",
+            5: "",
+            6: "; ".join(vacation_list) if vacation_list else "",
+            7: "; ".join(trip_list) if trip_list else "",
+            8: "; ".join(sick_list) if sick_list else "",
+            9: "; ".join(on_duty_list) if on_duty_list else "",
+            10: "; ".join(after_duty_list) if after_duty_list else "",
+            11: "; ".join(training_list) if training_list else "",
+            12: "; ".join(seconded_from_list) if seconded_from_list else "",
+            13: "; ".join(seconded_to_list) if seconded_to_list else ""
+        }
+
+        for col_num, value in detail_data.items():
+            cell = ws.cell(row=current_row, column=col_num)
+            cell.value = value
+            cell.border = border
+            cell.alignment = Alignment(horizontal='left', vertical='top', wrap_text=True)
+            cell.font = Font(size=9)
+
+        # Устанавливаем высоту строки с деталями (4 см ≈ 113 пунктов)
+        ws.row_dimensions[current_row].height = 113
+
+        # Объединяем ячейки A, B, C, D, E по вертикали (название управления на 2 строки)
+        for col in range(1, 6):  # Колонки A-E (1-5)
+            ws.merge_cells(start_row=dir_start_row, start_column=col, end_row=current_row, end_column=col)
+            cell = ws.cell(row=dir_start_row, column=col)
+            cell.alignment = Alignment(horizontal='left' if col == 1 else 'center', vertical='center')
+            if col == 1:
+                cell.font = Font(bold=True)
 
     # ИТОГОВАЯ СТРОКА
-    safe_set_cell_value(ws, current_row, 1, "ИТОГО")
-    safe_set_cell_value(ws, current_row, 2, total_staff_units)
-    safe_set_cell_value(ws, current_row, 3, total_employees)
-    safe_set_cell_value(ws, current_row, 4, total_in_service)
-    safe_set_cell_value(ws, current_row, 5, total_vacancies)
-    safe_set_cell_value(ws, current_row, 6, total_vacation)
-    safe_set_cell_value(ws, current_row, 7, total_business_trip)
-    safe_set_cell_value(ws, current_row, 8, total_sick)
-    safe_set_cell_value(ws, current_row, 9, total_on_duty)
-    safe_set_cell_value(ws, current_row, 10, total_after_duty)
-    safe_set_cell_value(ws, current_row, 11, total_training)
-    safe_set_cell_value(ws, current_row, 12, total_seconded_from)
-    safe_set_cell_value(ws, current_row, 13, total_seconded_to)
+    current_row += 1
+
+    total_data = [
+        "ИТОГО",
+        total_staff_units,
+        total_employees,
+        total_in_service,
+        total_vacancies,
+        total_vacation,
+        total_business_trip,
+        total_sick,
+        total_on_duty,
+        total_after_duty,
+        total_training,
+        total_seconded_from,
+        total_seconded_to
+    ]
+
+    for col_num, value in enumerate(total_data, start=1):
+        cell = ws.cell(row=current_row, column=col_num)
+        cell.value = value
+        cell.border = border
+        cell.alignment = Alignment(horizontal='left' if col_num == 1 else 'center', vertical='center')
+        cell.font = Font(bold=True)
+        cell.fill = gray_fill  # Светло-серый цвет
 
     # Сохраняем в память
     output = BytesIO()
     wb.save(output)
     output.seek(0)
 
-    filename = f"расход_{department.name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    # Формируем имя файла с датой отчета
+    date_str = report_date.strftime('%Y-%m-%d')
+    filename = f"расход_{department.name}_на_{date_str}.xlsx"
 
     return output, filename

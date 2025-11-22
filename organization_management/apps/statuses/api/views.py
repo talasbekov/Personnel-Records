@@ -152,9 +152,11 @@ class EmployeeStatusViewSet(viewsets.ModelViewSet):
         # Разрешаем изменение только запланированных статусов
         if instance.state == EmployeeStatus.StatusState.PLANNED:
             today = timezone.now().date()
-            if instance.start_date <= today:
+            # Разрешаем редактирование статуса, который начинается сегодня
+            # Это позволяет пользователям корректировать текущий статус
+            if instance.start_date < today:
                 return Response(
-                    {'error': 'Нельзя изменить статус, дата начала которого уже наступила.'},
+                    {'error': 'Нельзя изменить статус, дата начала которого уже прошла.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -190,9 +192,11 @@ class EmployeeStatusViewSet(viewsets.ModelViewSet):
         # Разрешаем изменение только запланированных статусов
         if instance.state == EmployeeStatus.StatusState.PLANNED:
             today = timezone.now().date()
-            if instance.start_date <= today:
+            # Разрешаем редактирование статуса, который начинается сегодня
+            # Это позволяет пользователям корректировать текущий статус
+            if instance.start_date < today:
                 return Response(
-                    {'error': 'Нельзя изменить статус, дата начала которого уже наступила.'},
+                    {'error': 'Нельзя изменить статус, дата начала которого уже прошла.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 from django.db import models
 from django.utils.translation import gettext_lazy as _
+from django.conf import settings
 
 class Position(models.Model):
     """Справочник должностей согласно ТЗ"""
@@ -9,6 +10,7 @@ class Position(models.Model):
         verbose_name=_("Уровень"),
         help_text=_("Чем меньше число, тем выше должность")
     )
+    category = models.CharField(max_length=10, null=True, verbose_name=_("Категория"))
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -163,3 +165,23 @@ class Rank(models.Model):
 
     def __str__(self):
         return f"{self.name} (Уровень: {self.level})"
+
+
+class Feedback(models.Model):
+    """Модель для обратной связи от пользователей"""
+    message = models.TextField(verbose_name=_("Сообщение"))
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name='feedbacks',
+        verbose_name=_("Создал")
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("Дата создания"))
+
+    class Meta:
+        verbose_name = _("Обратная связь")
+        verbose_name_plural = _("Обратная связь")
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"Обратная связь от {self.created_by} - {self.created_at.strftime('%Y-%m-%d %H:%M')}"

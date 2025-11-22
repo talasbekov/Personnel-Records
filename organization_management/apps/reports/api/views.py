@@ -111,10 +111,11 @@ class ReportViewSet(viewsets.ModelViewSet):
     @extend_schema(
         parameters=[
             OpenApiParameter(
-                name='department_id',
-                type=OpenApiTypes.INT,
-                location=OpenApiParameter.PATH,
-                description='ID департамента для генерации отчета'
+                name='date',
+                type=OpenApiTypes.DATE,
+                location=OpenApiParameter.QUERY,
+                description='Дата для определения статусов сотрудников (формат: YYYY-MM-DD). Если не указана, используется текущая дата.',
+                required=False
             )
         ],
         responses={
@@ -128,47 +129,77 @@ class ReportViewSet(viewsets.ModelViewSet):
     @action(
         detail=False,
         methods=['get'],
-        url_path='expense/(?P<department_id>[^/.]+)',
+        url_path='expense',
         permission_classes=[permissions.IsAuthenticated]
     )
-    def expense(self, request, department_id=None):
+    def expense(self, request):
         """
-        Генерация и скачивание отчета "Расход" по департаменту.
-        GET /api/reports/reports/expense/<department_id>/
+        Генерация и скачивание отчета "Расход" по департаменту пользователя.
+        GET /api/reports/reports/expense/?date=2025-11-22
+
+        Система автоматически определяет департамент пользователя.
+        Опционально можно указать дату для определения статусов сотрудников.
         """
         user = request.user
 
-        if not department_id:
-            return Response({'detail': 'department_id обязателен'}, status=status.HTTP_400_BAD_REQUEST)
+        # Получаем дату из query параметра или используем текущую
+        report_date = request.query_params.get('date')
+        if report_date:
+            from datetime import datetime
+            try:
+                report_date = datetime.strptime(report_date, '%Y-%m-%d').date()
+            except ValueError:
+                return Response(
+                    {'detail': 'Неверный формат даты. Используйте YYYY-MM-DD'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            from datetime import date
+            report_date = date.today()
 
-        # Проверяем существование департамента
-        try:
-            department = Division.objects.get(
-                pk=department_id,
-                division_type=Division.DivisionType.DEPARTMENT
-            )
-        except Division.DoesNotExist:
-            return Response({'detail': 'Департамент не найден'}, status=status.HTTP_404_NOT_FOUND)
+        # Определяем департамент пользователя
+        department = None
 
-        # Проверка прав доступа
-        if not user.is_superuser:
+        if user.is_superuser:
+            # Суперпользователь может выбрать любой департамент (берем первый)
+            department = Division.objects.filter(
+                division_type=Division.DivisionType.DEPARTMENT,
+                is_active=True
+            ).first()
+        else:
+            # Получаем подразделение пользователя
             user_division = None
             if hasattr(user, 'role_info'):
                 user_division = user.role_info.get_user_division()
 
             if not user_division:
-                return Response({'detail': 'Нет зоны ответственности'}, status=status.HTTP_403_FORBIDDEN)
-
-            allowed = user_division.get_descendants(include_self=True)
-            if department.id not in allowed.values_list('id', flat=True):
                 return Response(
-                    {'detail': 'Департамент вне зоны ответственности'},
+                    {'detail': 'Не удалось определить подразделение пользователя'},
                     status=status.HTTP_403_FORBIDDEN
                 )
 
+            # Поднимаемся до департамента (level=1)
+            current = user_division
+            while current and current.level > 1:
+                current = current.parent
+
+            if current and current.level == 1 and current.division_type == Division.DivisionType.DEPARTMENT:
+                department = current
+            else:
+                return Response(
+                    {'detail': 'Не удалось определить департамент пользователя'},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
+        if not department:
+            return Response(
+                {'detail': 'Департамент не найден'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
         # Генерируем отчет
         try:
-            file_buffer, filename = generate_personnel_expense_report(department_id)
+            file_buffer, filename = generate_personnel_expense_report(department.id, report_date)
 
             response = FileResponse(
                 file_buffer,

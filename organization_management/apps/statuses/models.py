@@ -192,21 +192,39 @@ class EmployeeStatus(models.Model):
             # Определяем конечную дату для проверки
             check_end_date = self.end_date or timezone.now().date() + timedelta(days=36500)  # 100 лет в будущее
 
-            # Ищем пересекающиеся активные статусы
+            # Ищем пересекающиеся активные статусы, исключая текущий редактируемый статус
             overlapping = EmployeeStatus.objects.filter(
                 employee_id=self.employee_id,
                 state__in=[self.StatusState.ACTIVE, self.StatusState.PLANNED]
-            ).exclude(pk=self.pk if self.pk else None)
+            )
+            
+            # ВАЖНО: Исключаем текущий редактируемый статус из проверки
+            # Это позволяет редактировать существующие статусы без блокировки
+            if self.pk:
+                overlapping = overlapping.exclude(pk=self.pk)
 
             for other_status in overlapping:
-                # ИСКЛЮЧЕНИЕ: Разрешаем пересечение с "В строю" для запланированных статусов
-                # так как "В строю" будет автоматически завершен при активации нового статуса
                 today = timezone.now().date()
+
+                # ИСКЛЮЧЕНИЕ 1: Разрешаем пересечение с "В строю" для запланированных статусов
+                # так как "В строю" будет автоматически завершен при активации нового статуса
                 is_planned_status = self.start_date > today
                 is_other_in_service = other_status.status_type == self.StatusType.IN_SERVICE
 
                 if is_planned_status and is_other_in_service:
                     # Разрешаем создавать запланированные статусы при наличии активного "В строю"
+                    continue
+
+                # ИСКЛЮЧЕНИЕ 2: Разрешаем создание или редактирование статуса на сегодняшний день
+                # Это позволяет исправлять ошибки или менять статус на сегодня
+                # (например, сотрудник заболел в обед, нужно изменить его статус)
+                # При этом предыдущий статус будет автоматически завершен
+                is_status_today = self.start_date == today
+                is_other_status_today = other_status.start_date == today
+
+                if is_status_today and is_other_status_today:
+                    # Разрешаем создавать/редактировать статус на сегодня, который заменит существующий
+                    # Предыдущий статус нужно будет завершить при сохранении
                     continue
 
                 other_end = other_status.end_date or timezone.now().date() + timedelta(days=36500)

@@ -162,54 +162,76 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
 
     def list(self, request, *args, **kwargs):
         """
-        Список штатных единиц с группировкой по подразделениям
+        Иерархический список штатных единиц с учетом области видимости пользователя.
+        Возвращает дерево подразделений с сотрудниками.
         """
-        queryset = self.filter_queryset(self.get_queryset())
+        from organization_management.apps.staff_unit.serializers import DivisionHierarchySerializer
 
-        # Получаем все штатные единицы с сортировкой по MPTT полям Division и уровню должности
-        staff_units = queryset.select_related('division', 'position', 'employee', 'vacancy').order_by(
-            'division__tree_id', 'division__lft', 'position__level', 'index'
-        )
+        user = request.user
 
-        # Группируем по division
-        grouped_data = {}
+        # Определяем корневое подразделение на основе области видимости
+        if user.is_superuser:
+            # Суперпользователь видит всю организацию
+            root_division = Division.objects.filter(parent=None).first()
+        elif hasattr(user, 'role_info') and user.role_info.scope_division:
+            # Обычный пользователь видит только свое подразделение и ниже
+            root_division = user.role_info.scope_division
+        else:
+            # Пользователь без подразделения видит всю организацию
+            root_division = Division.objects.filter(parent=None).first()
+
+        if not root_division:
+            return Response({
+                'error': 'Не удалось определить корневое подразделение'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        # Получаем все подразделения в области видимости (корень + потомки)
+        all_divisions = root_division.get_descendants(include_self=True)
+
+        # Получаем все штатные единицы из этих подразделений с prefetch
+        staff_units = StaffUnit.objects.filter(
+            division__in=all_divisions
+        ).select_related(
+            'division', 'position', 'employee', 'employee__rank', 'vacancy'
+        ).prefetch_related(
+            Prefetch(
+                'employee__statuses',
+                queryset=EmployeeStatus.objects.filter(
+                    state=EmployeeStatus.StatusState.ACTIVE
+                ).order_by('-start_date')
+            )
+        ).order_by('position__level', 'index')
+
+        # Группируем штатные единицы по подразделениям
+        divisions_map = {}
         for unit in staff_units:
             division_id = unit.division_id
 
-            if division_id not in grouped_data:
-                # Первая единица этого подразделения - создаем базовую структуру
-                grouped_data[division_id] = {
-                    'id': unit.id,
-                    'division': {
-                        'id': unit.division.id,
-                        'name': unit.division.name
-                    } if unit.division else None,
-                    'index': unit.index,
-                    'vacancy': unit.vacancy.id if unit.vacancy else None,
+            if division_id not in divisions_map:
+                divisions_map[division_id] = {
+                    'division': unit.division,
                     'employees': []
                 }
 
-            # Добавляем сотрудника/позицию в список
+            # Формируем данные сотрудника
             employee_data = {
                 'position': {
                     'id': unit.position.id,
                     'name': unit.position.name,
                     'level': unit.position.level
                 } if unit.position else None,
-                'employee': None
+                'employee': None,
+                'vacancy': None,
+                'index': unit.index
             }
 
             if unit.employee:
-                # Получаем текущий статус сотрудника
-                current_status = EmployeeStatus.objects.filter(
-                    employee=unit.employee,
-                    state=EmployeeStatus.StatusState.ACTIVE
-                ).first()
-
+                current_status = unit.employee.statuses.first() if unit.employee.statuses.all() else None
                 employee_data['employee'] = {
                     'id': unit.employee.id,
                     'first_name': unit.employee.first_name,
                     'last_name': unit.employee.last_name,
+                    'middle_name': unit.employee.middle_name,
                     'current_status': {
                         'status_type': current_status.status_type,
                         'state': current_status.state,
@@ -218,12 +240,38 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                     } if current_status else None,
                     'rank': unit.employee.rank_id
                 }
+            elif unit.vacancy:
+                employee_data['vacancy'] = {
+                    'id': unit.vacancy.id,
+                    'status': unit.vacancy.status,
+                    'requirements': unit.vacancy.requirements
+                }
 
-            grouped_data[division_id]['employees'].append(employee_data)
+            divisions_map[division_id]['employees'].append(employee_data)
 
-        # Преобразуем в список и возвращаем
-        result = list(grouped_data.values())
-        return Response(result)
+        # Рекурсивно строим дерево
+        def build_tree(division):
+            """Рекурсивно строим дерево подразделений"""
+            node = {
+                'division': division,
+                'employees': divisions_map.get(division.id, {}).get('employees', []),
+                'children': []
+            }
+
+            # Получаем прямых потомков
+            children = division.get_children()
+            for child in children:
+                if child.id in [d.id for d in all_divisions]:
+                    node['children'].append(build_tree(child))
+
+            return node
+
+        # Строим дерево от корневого подразделения
+        hierarchy = build_tree(root_division)
+
+        # Сериализуем результат
+        serializer = DivisionHierarchySerializer(hierarchy)
+        return Response(serializer.data)
 
     def retrieve(self, request, *args, **kwargs):
         """
@@ -782,47 +830,12 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                         errors.append({'staff_unit': f'Индекс {idx}: Не удалось найти сотрудника для привязки. Штатная единица не создана.'})
                         continue
 
-                    # Автоматическое определение родителя
-                    parent_unit = None
-
-                    try:
-                        # 1. Получаем объект должности для проверки уровня
-                        from organization_management.apps.dictionaries.models import Position
-                        current_position = Position.objects.get(id=position_id)
-
-                        # 2. Ищем начальника ВНУТРИ текущего подразделения
-                        # Начальник - это тот, у кого уровень должности МЕНЬШЕ (выше ранг)
-                        internal_boss = StaffUnit.objects.filter(
-                            division_id=division_id,
-                            position__level__lt=current_position.level
-                        ).order_by('position__level').first()
-
-                        if internal_boss:
-                            parent_unit = internal_boss
-                        else:
-                            # 3. Если внутри начальника нет, ищем в РОДИТЕЛЬСКОМ подразделении
-                            current_division = Division.objects.get(id=division_id)
-                            if current_division.parent:
-                                # В родительском подразделении ищем сотрудника с самым высоким рангом (min level)
-                                parent_division_boss = StaffUnit.objects.filter(
-                                    division=current_division.parent
-                                ).order_by('position__level').first()
-
-                                if parent_division_boss:
-                                    parent_unit = parent_division_boss
-
-                    except Exception as e:
-                        # Логируем ошибку определения родителя, но не прерываем создание
-                        print(f"Ошибка определения родителя: {e}")
-                        pass
-
                     # Создаем штатную единицу
                     staff_unit = StaffUnit.objects.create(
                         division_id=division_id,
                         position_id=position_id,
                         index=next_index,
                         employee_id=employee_id,  # Привязываем сотрудника по найденному ID
-                        parent_id=parent_unit.id if parent_unit else None
                     )
 
                     created_items['staff_units'].append({
@@ -1059,13 +1072,13 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
         """
         Определяет СОБСТВЕННОЕ подразделение пользователя (для directorate endpoint).
 
-        НЕ использует область видимости - возвращает именно подразделение где работает сотрудник:
+        СТРОГО по роли - НЕ использует scope_division для ROLE_3 и ROLE_6.
+        Возвращает именно подразделение где работает сотрудник:
         - ROLE_3: управление (level=2) - поднимается до управления если сотрудник в отделе
         - ROLE_6: отдел (level=3) - возвращает отдел как есть
         - ROLE_7: департамент (level=1) - поднимается до департамента
 
         Для ROLE_7 scope_division имеет приоритет (может быть указан вручную).
-        Для ROLE_3 и ROLE_6: если scope_division указан вручную и НЕ на уровне департамента - использует его.
         """
         if user.is_superuser:
             return Division.objects.filter(level=0).first()
@@ -1108,13 +1121,8 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
 
                 return None
 
-            # Для ROLE_3 и ROLE_6: старая логика
-            # Приоритет 1: Если scope_division указан вручную И он НЕ департамент (level != 1)
-            # то используем его (это управление или отдел)
-            if user_role.scope_division and user_role.scope_division.level != 1:
-                return user_role.scope_division
-
-            # Приоритет 2: Автоматическое определение через Employee → StaffUnit → Division
+            # Для ROLE_3 и ROLE_6: СТРОГО по роли через Employee → StaffUnit → Division
+            # НЕ используем scope_division вообще
             if hasattr(user, 'employee'):
                 employee = user.employee
                 if hasattr(employee, 'staff_unit') and employee.staff_unit:
@@ -1134,11 +1142,7 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                     # Для ROLE_6 (Начальник отдела): возвращаем отдел как есть
                     return division
 
-            # Приоритет 3: Если scope_division на уровне департамента, но больше нечего вернуть
-            # возвращаем его (хотя это неправильно для directorate endpoint для ROLE_3 и ROLE_6)
-            if user_role.scope_division:
-                return user_role.scope_division
-
+            # Если нет связи employee → staff_unit → division, возвращаем None
             return None
 
         except Exception:
