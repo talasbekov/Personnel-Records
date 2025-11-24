@@ -14,13 +14,23 @@ from organization_management.apps.divisions.models import Division
 class EmployeeBasicSerializer(serializers.ModelSerializer):
     """Базовый сериализатор сотрудника для вложенного представления"""
     full_name = serializers.SerializerMethodField()
+    photo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Employee
-        fields = ['id', 'personnel_number', 'last_name', 'first_name', 'middle_name', 'full_name']
+        fields = ['id', 'personnel_number', 'last_name', 'first_name', 'middle_name', 'full_name', 'photo_url']
 
     def get_full_name(self, obj: Employee) -> str:
         return f"{obj.last_name} {obj.first_name} {obj.middle_name}".strip()
+
+    def get_photo_url(self, obj: Employee) -> str:
+        """Возвращает URL фото сотрудника"""
+        if obj.photo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.photo.url)
+            return obj.photo.url
+        return None
 
 
 class DivisionBasicSerializer(serializers.ModelSerializer):

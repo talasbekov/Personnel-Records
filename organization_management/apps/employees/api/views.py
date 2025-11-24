@@ -28,17 +28,23 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         qs = super().get_queryset()
         if not user.is_authenticated:
             return qs.none()
-        role = getattr(user, "role", None)
-        if role in (user.RoleType.SYSTEM_ADMIN, user.RoleType.OBSERVER_ORG):  # type: ignore[attr-defined]
-            return qs
-        if not user.division_id:
-            return qs.none()
-        if role == user.RoleType.HR_ADMIN:  # type: ignore[attr-defined]
-            allowed = user.division.get_descendants(include_self=True)
-        else:
-            dept_root = self._get_department_root(user.division)
-            allowed = dept_root.get_descendants(include_self=True)
-        return qs.filter(division_id__in=allowed.values_list("id", flat=True))
+
+        # Пока возвращаем все записи для аутентифицированных пользователей
+        # TODO: Добавить проверку ролей после реализации системы ролей
+        return qs
+
+        # Закомментированный код для будущей реализации:
+        # role = getattr(user, "role", None)
+        # if role in (user.RoleType.SYSTEM_ADMIN, user.RoleType.OBSERVER_ORG):  # type: ignore[attr-defined]
+        #     return qs
+        # if not user.division_id:
+        #     return qs.none()
+        # if role == user.RoleType.HR_ADMIN:  # type: ignore[attr-defined]
+        #     allowed = user.division.get_descendants(include_self=True)
+        # else:
+        #     dept_root = self._get_department_root(user.division)
+        #     allowed = dept_root.get_descendants(include_self=True)
+        # return qs.filter(division_id__in=allowed.values_list("id", flat=True))
 
     def _gen_personnel_number(self) -> str:
         last = (

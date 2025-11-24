@@ -151,6 +151,13 @@ class EmployeeStatus(models.Model):
             # Убрали проверку actual_end_date > end_date, так как при автозавершении
             # старых статусов actual_end_date специально ставится раньше end_date
 
+        # Проверка, что дата начала не в прошлом (только для новых статусов)
+        today = timezone.now().date()
+        if not self.pk and self.start_date and self.start_date < today:
+            raise ValidationError({
+                'start_date': f"Нельзя создавать статус на прошедшую дату. Дата начала должна быть не раньше {today}."
+            })
+
         # Проверка, что дата начала не раньше даты приема сотрудника
         if self.employee_id:
             from organization_management.apps.employees.models import Employee
@@ -243,8 +250,8 @@ class EmployeeStatus(models.Model):
         # Автоматически устанавливаем состояние в зависимости от дат
         today = timezone.now().date()
 
-        # Только для новых записей или активных статусов автоматически определяем состояние
-        if not self.state or self.state == self.StatusState.ACTIVE:
+        # Только для новых записей, активных или запланированных статусов автоматически определяем состояние
+        if not self.state or self.state in [self.StatusState.ACTIVE, self.StatusState.PLANNED]:
             if self.start_date > today:
                 self.state = self.StatusState.PLANNED
             elif self.actual_end_date and self.actual_end_date < today:

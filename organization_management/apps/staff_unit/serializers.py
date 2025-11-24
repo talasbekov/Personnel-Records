@@ -37,10 +37,11 @@ class EmployeeStatusBriefSerializer(serializers.ModelSerializer):
 class EmployeeSerializer(serializers.ModelSerializer):
     rank = serializers.PrimaryKeyRelatedField(queryset=Rank.objects.all())
     current_status = serializers.SerializerMethodField(read_only=True)
+    photo_url = serializers.SerializerMethodField()
 
     class Meta:
         model = Employee
-        fields = ["id", "first_name", "last_name", "current_status", "rank"]
+        fields = ["id", "first_name", "last_name", "current_status", "rank", "photo", "photo_url"]
         extra_kwargs = {
             "first_name": {"required": True},
             "last_name": {"required": True},
@@ -67,6 +68,15 @@ class EmployeeSerializer(serializers.ModelSerializer):
             "status_type": EmployeeStatus.StatusType.IN_SERVICE,
             "state": EmployeeStatus.StatusState.ACTIVE,
         }
+
+    def get_photo_url(self, obj: Employee) -> str:
+        """Возвращает URL фото сотрудника"""
+        if obj.photo:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.photo.url)
+            return obj.photo.url
+        return None
 
 
 class StaffUnitSerializer(serializers.ModelSerializer):

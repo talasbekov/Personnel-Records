@@ -1,7 +1,7 @@
 """
 API Views для управления статусами сотрудников
 """
-from datetime import date
+from datetime import date, timedelta
 from rest_framework import viewsets, permissions, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -85,7 +85,7 @@ class EmployeeStatusViewSet(viewsets.ModelViewSet):
         """Выбор сериализатора в зависимости от действия"""
         if self.action == 'retrieve':
             return EmployeeStatusDetailSerializer
-        elif self.action == 'create':
+        elif self.action in ['create', 'update', 'partial_update']:
             return EmployeeStatusCreateSerializer
         elif self.action == 'extend':
             return EmployeeStatusExtendSerializer
@@ -126,16 +126,88 @@ class EmployeeStatusViewSet(viewsets.ModelViewSet):
 
         Бизнес-правила:
         - Запланированные статусы можно изменять до даты начала
-        - Активные статусы можно изменять только через специальные методы (extend, terminate)
+        - Активные статусы на сегодня можно изменить (для исправления ошибок)
+        - При изменении активного статуса на сегодня: старый завершается, создается новый
         """
         instance = self.get_object()
+        today = timezone.now().date()
 
         # Проверка: можно ли изменять этот статус
         if instance.state == EmployeeStatus.StatusState.ACTIVE:
-            return Response(
-                {'error': 'Активный статус можно только продлить (extend) или завершить досрочно (terminate).'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+            # Разрешаем изменять активный статус, если он активен сегодня
+            # (например, сотрудник заболел в обед, нужно исправить статус)
+            # Проверяем: start_date <= today <= end_date (или end_date is None)
+            is_active_today = (instance.start_date <= today and
+                              (instance.end_date is None or instance.end_date >= today))
+
+            if is_active_today:
+                # Завершаем текущий статус
+                try:
+                    # Используем QuerySet.update() для обхода model.save() и full_clean()
+                    # так как для статуса "В строю" валидация запрещает end_date,
+                    # но при завершении статуса нам нужно его установить
+                    update_data = {
+                        'state': EmployeeStatus.StatusState.COMPLETED,
+                        'actual_end_date': today,
+                        'updated_at': timezone.now()
+                    }
+
+                    # Устанавливаем end_date = today для корректной валидации пересечений
+                    if instance.end_date is None or instance.end_date > today:
+                        update_data['end_date'] = today
+
+                    EmployeeStatus.objects.filter(pk=instance.pk).update(**update_data)
+
+                    # Обновляем instance для дальнейшего использования
+                    instance.refresh_from_db()
+
+                    # Создаем новый статус с обновленными данными
+                    serializer = self.get_serializer(data=request.data, partial=kwargs.get('partial', False))
+                    serializer.is_valid(raise_exception=True)
+
+                    # Отменяем запланированные статусы, которые пересекаются с новым статусом
+                    # ДО создания нового статуса, чтобы избежать ошибки валидации
+                    new_start_date = serializer.validated_data.get('start_date', instance.start_date)
+                    new_end_date = serializer.validated_data.get('end_date', instance.end_date)
+
+                    if new_end_date:
+                        conflicting_planned = EmployeeStatus.objects.filter(
+                            employee=instance.employee,
+                            state=EmployeeStatus.StatusState.PLANNED,
+                            start_date__lte=new_end_date
+                        )
+
+                        for planned_status in conflicting_planned:
+                            # Проверяем реальное пересечение
+                            planned_end = planned_status.end_date or (new_end_date + timedelta(days=36500))
+                            if new_start_date <= planned_end:
+                                planned_status.state = EmployeeStatus.StatusState.CANCELLED
+                                planned_status.early_termination_reason = f"Отменен автоматически из-за изменения статуса на {today}"
+                                planned_status.save()
+
+                    new_status = self.service.create_status(
+                        employee_id=instance.employee.id,
+                        status_type=serializer.validated_data.get('status_type', instance.status_type),
+                        start_date=serializer.validated_data.get('start_date', instance.start_date),
+                        end_date=serializer.validated_data.get('end_date', instance.end_date),
+                        comment=serializer.validated_data.get('comment', instance.comment),
+                        location=serializer.validated_data.get('location', instance.location),
+                        related_division_id=serializer.validated_data.get('related_division').id if serializer.validated_data.get('related_division') else (instance.related_division.id if instance.related_division else None),
+                        user=request.user
+                    )
+
+                    output_serializer = EmployeeStatusSerializer(new_status, context={'request': request})
+                    return Response(output_serializer.data, status=status.HTTP_200_OK)
+
+                except ValidationError as e:
+                    return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+                except Exception as e:
+                    return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            else:
+                return Response(
+                    {'error': 'Активный статус можно только продлить (extend) или завершить досрочно (terminate).'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
         if instance.state == EmployeeStatus.StatusState.COMPLETED:
             return Response(
@@ -159,48 +231,45 @@ class EmployeeStatusViewSet(viewsets.ModelViewSet):
                     {'error': 'Нельзя изменить статус, дата начала которого уже прошла.'},
                     status=status.HTTP_400_BAD_REQUEST
                 )
+
+            # Для запланированных статусов также проверяем конфликты
+            # и отменяем пересекающиеся запланированные статусы
+            serializer = self.get_serializer(instance, data=request.data, partial=kwargs.get('partial', False))
+            serializer.is_valid(raise_exception=True)
+
+            new_start_date = serializer.validated_data.get('start_date', instance.start_date)
+            new_end_date = serializer.validated_data.get('end_date', instance.end_date)
+
+            if new_end_date:
+                # Отменяем другие запланированные статусы, которые пересекаются
+                conflicting_planned = EmployeeStatus.objects.filter(
+                    employee=instance.employee,
+                    state=EmployeeStatus.StatusState.PLANNED,
+                    start_date__lte=new_end_date
+                ).exclude(pk=instance.pk)
+
+                for planned_status in conflicting_planned:
+                    # Проверяем реальное пересечение
+                    planned_end = planned_status.end_date or (new_end_date + timedelta(days=36500))
+                    if new_start_date <= planned_end:
+                        planned_status.state = EmployeeStatus.StatusState.CANCELLED
+                        planned_status.early_termination_reason = f"Отменен автоматически из-за изменения статуса на {today}"
+                        planned_status.save()
+
+            # Продолжаем стандартное обновление
+            self.perform_update(serializer)
+            return Response(serializer.data)
 
         return super().update(request, *args, **kwargs)
 
     def partial_update(self, request, *args, **kwargs):
         """
-        Частичное обновление статуса
+        Частичное обновление статуса (PATCH)
 
         Применяются те же правила, что и для полного обновления
         """
-        instance = self.get_object()
-
-        # Проверка: можно ли изменять этот статус
-        if instance.state == EmployeeStatus.StatusState.ACTIVE:
-            return Response(
-                {'error': 'Активный статус можно только продлить (extend) или завершить досрочно (terminate).'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if instance.state == EmployeeStatus.StatusState.COMPLETED:
-            return Response(
-                {'error': 'Завершенный статус нельзя изменить.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        if instance.state == EmployeeStatus.StatusState.CANCELLED:
-            return Response(
-                {'error': 'Отмененный статус нельзя изменить.'},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        # Разрешаем изменение только запланированных статусов
-        if instance.state == EmployeeStatus.StatusState.PLANNED:
-            today = timezone.now().date()
-            # Разрешаем редактирование статуса, который начинается сегодня
-            # Это позволяет пользователям корректировать текущий статус
-            if instance.start_date < today:
-                return Response(
-                    {'error': 'Нельзя изменить статус, дата начала которого уже прошла.'},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-        return super().partial_update(request, *args, **kwargs)
+        kwargs['partial'] = True
+        return self.update(request, *args, **kwargs)
 
     def destroy(self, request, *args, **kwargs):
         """

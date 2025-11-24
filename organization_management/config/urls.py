@@ -34,8 +34,9 @@ urlpatterns = [
     # path("api/audit/", include("organization_management.apps.audit.api.urls")),
     path("api/dictionaries/", include("organization_management.apps.dictionaries.api.urls")),
     path("api/divisions/", include("organization_management.apps.divisions.api.urls")),
-    # path("api/employees/", include("organization_management.apps.employees.api.urls")),
+    path("api/employees/", include("organization_management.apps.employees.api.urls")),
 ]
 
 if settings.DEBUG:
     urlpatterns += static(settings.STATIC_URL, document_root=settings.STATIC_ROOT)
+    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

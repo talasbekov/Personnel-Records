@@ -227,6 +227,12 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
 
             if unit.employee:
                 current_status = unit.employee.statuses.first() if unit.employee.statuses.all() else None
+
+                # Формируем photo_url
+                photo_url = None
+                if unit.employee.photo:
+                    photo_url = request.build_absolute_uri(unit.employee.photo.url)
+
                 employee_data['employee'] = {
                     'id': unit.employee.id,
                     'first_name': unit.employee.first_name,
@@ -238,7 +244,9 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                         'start_date': current_status.start_date,
                         'end_date': current_status.end_date
                     } if current_status else None,
-                    'rank': unit.employee.rank_id
+                    'rank': unit.employee.rank_id,
+                    'photo': unit.employee.photo.url if unit.employee.photo else None,
+                    'photo_url': photo_url
                 }
             elif unit.vacancy:
                 employee_data['vacancy'] = {
@@ -576,6 +584,11 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                         created_by=user
                     )
 
+                # Формируем photo_url
+                photo_url = None
+                if unit.employee.photo:
+                    photo_url = request.build_absolute_uri(unit.employee.photo.url)
+
                 unit_data['employee'] = {
                     'id': unit.employee.id,
                     'first_name': unit.employee.first_name,
@@ -583,7 +596,9 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                     'current_status': {
                         'status_type': current_status.status_type,
                         'state': current_status.state,
-                    } if current_status else None
+                    } if current_status else None,
+                    'photo': unit.employee.photo.url if unit.employee.photo else None,
+                    'photo_url': photo_url
                 }
 
             # Vacancy
