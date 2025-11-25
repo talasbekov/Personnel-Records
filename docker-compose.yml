@@ -8,22 +8,22 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "5432:5432"
+      - "5440:5432"
 
   redis:
     image: redis:7-alpine
     ports:
-      - "6379:6379"
+      - "6380:6379"
 
   web:
     build: .
-    entrypoint: /app/docker/entrypoint.sh
+    entrypoint: ["/bin/sh", "/app/docker/entrypoint.sh"]
     command: gunicorn organization_management.config.wsgi:application --bind 0.0.0.0:8000 --workers 4 --timeout 120 --graceful-timeout 30 --keep-alive 5
     volumes:
       - .:/app
       - ./staticfiles:/app/staticfiles
     ports:
-      - "8000:8000"
+      - "8100:8000"
     environment:
       - DJANGO_SETTINGS_MODULE=organization_management.config.settings.production
     env_file:

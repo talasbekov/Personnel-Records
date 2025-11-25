@@ -234,6 +234,16 @@ class EmployeeStatus(models.Model):
                     # Предыдущий статус нужно будет завершить при сохранении
                     continue
 
+                # ИСКЛЮЧЕНИЕ 3: Разрешаем пересечение статусов прикомандирования друг с другом
+                # При прикомандировании создаются ДВА статуса одновременно (SECONDED_TO и SECONDED_FROM)
+                # для одного сотрудника, поэтому они должны мочь сосуществовать
+                is_self_secondment = self.status_type in [self.StatusType.SECONDED_TO, self.StatusType.SECONDED_FROM]
+                is_other_secondment = other_status.status_type in [self.StatusType.SECONDED_TO, self.StatusType.SECONDED_FROM]
+
+                if is_self_secondment and is_other_secondment:
+                    # Разрешаем пересечение статусов прикомандирования
+                    continue
+
                 other_end = other_status.end_date or timezone.now().date() + timedelta(days=36500)
 
                 # Проверяем пересечение периодов
@@ -250,8 +260,21 @@ class EmployeeStatus(models.Model):
         # Автоматически устанавливаем состояние в зависимости от дат
         today = timezone.now().date()
 
-        # Только для новых записей, активных или запланированных статусов автоматически определяем состояние
-        if not self.state or self.state in [self.StatusState.ACTIVE, self.StatusState.PLANNED]:
+        # Для новых записей (pk отсутствует) автоматически определяем состояние если оно не указано
+        is_new = self.pk is None
+
+        if is_new and not self.state:
+            # Только для новых записей без явно указанного state
+            if self.start_date > today:
+                self.state = self.StatusState.PLANNED
+            elif self.actual_end_date and self.actual_end_date < today:
+                self.state = self.StatusState.COMPLETED
+            elif self.end_date and self.end_date < today:
+                self.state = self.StatusState.COMPLETED
+            else:
+                self.state = self.StatusState.ACTIVE
+        elif not is_new and self.state in [self.StatusState.ACTIVE, self.StatusState.PLANNED]:
+            # Для существующих записей с ACTIVE/PLANNED пересчитываем автоматически
             if self.start_date > today:
                 self.state = self.StatusState.PLANNED
             elif self.actual_end_date and self.actual_end_date < today:

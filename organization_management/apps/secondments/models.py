@@ -46,6 +46,13 @@ class SecondmentRequest(models.Model):
         related_name='approved_secondments'
     )
     approved_at = models.DateTimeField(null=True, blank=True)
+    rejected_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='rejected_secondments'
+    )
     rejection_reason = models.TextField(blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)

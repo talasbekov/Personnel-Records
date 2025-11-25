@@ -8,6 +8,7 @@ class Notification(models.Model):
         STATUS_CHANGED = 'status_changed', 'Изменение статуса'
         SECONDMENT_REQUEST = 'secondment_request', 'Запрос на прикомандирование'
         SECONDMENT_APPROVED = 'secondment_approved', 'Прикомандирование одобрено'
+        SECONDMENT_REJECTED = 'secondment_rejected', 'Прикомандирование отклонено'
         REPORT_READY = 'report_ready', 'Отчет готов'
         EMPLOYEE_HIRED = 'employee_hired', 'Прием на работу'
 

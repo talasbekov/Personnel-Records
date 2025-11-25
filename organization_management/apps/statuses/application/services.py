@@ -60,6 +60,36 @@ class StatusApplicationService:
             except Division.DoesNotExist:
                 raise ValidationError(f"Подразделение с ID {related_division_id} не найдено.")
 
+        # =============================================================================
+        # ПРОВЕРКА ДОСТУПНОСТИ СТАТУСОВ ДЛЯ ОТКОМАНДИРОВАННЫХ/ПРИКОМАНДИРОВАННЫХ
+        # =============================================================================
+        # Логика:
+        # - Если сотрудник откомандирован (SECONDED_TO) - запрещаем локальные статусы
+        # - Если сотрудник прикомандирован (SECONDED_FROM) - разрешаем локальные статусы
+        # =============================================================================
+        if status_type not in [EmployeeStatus.StatusType.SECONDED_FROM, EmployeeStatus.StatusType.SECONDED_TO]:
+            # Проверяем активные статусы прикомандирования
+            active_secondment = EmployeeStatus.objects.filter(
+                employee_id=employee_id,
+                status_type__in=[EmployeeStatus.StatusType.SECONDED_TO, EmployeeStatus.StatusType.SECONDED_FROM],
+                state__in=[EmployeeStatus.StatusState.ACTIVE, EmployeeStatus.StatusState.PLANNED]
+            ).filter(
+                # Проверяем, что статус пересекается с запрашиваемым периодом
+                Q(start_date__lte=start_date) &
+                (Q(end_date__isnull=True) | Q(end_date__gte=start_date))
+            ).first()
+
+            if active_secondment:
+                if active_secondment.status_type == EmployeeStatus.StatusType.SECONDED_TO:
+                    # Сотрудник откомандирован - запрещаем локальные статусы
+                    raise ValidationError(
+                        f'Сотрудник откомандирован в подразделение "{active_secondment.related_division}" '
+                        f'на период с {active_secondment.start_date} по {active_secondment.end_date or "не указано"}. '
+                        f'В исходном подразделении нельзя устанавливать другие статусы, '
+                        f'пока сотрудник откомандирован.'
+                    )
+                # Если SECONDED_FROM - разрешаем локальные статусы (сотрудник прикомандирован к нам)
+
         # Автоматически завершаем текущий активный статус, если новый статус не прикомандирование
         # и текущий статус тоже не прикомандирование
         # ВАЖНО: Завершаем только если новый статус уже начался (не запланированный в будущем)
@@ -258,6 +288,7 @@ class StatusApplicationService:
     def get_employee_current_status(self, employee_id: int) -> Optional[EmployeeStatus]:
         """
         Получение текущего активного статуса сотрудника
+        ПРИОРИТЕТ: статусы прикомандирования (SECONDED_TO, SECONDED_FROM) имеют наивысший приоритет
 
         Args:
             employee_id: ID сотрудника
@@ -266,13 +297,30 @@ class StatusApplicationService:
             Optional[EmployeeStatus]: Текущий статус или None
         """
         today = timezone.now().date()
+
+        # ПРИОРИТЕТ 1: Проверяем статусы прикомандирования (наивысший приоритет)
+        secondment_status = EmployeeStatus.objects.filter(
+            employee_id=employee_id,
+            status_type__in=[EmployeeStatus.StatusType.SECONDED_TO, EmployeeStatus.StatusType.SECONDED_FROM],
+            state__in=[EmployeeStatus.StatusState.ACTIVE, EmployeeStatus.StatusState.PLANNED],
+            start_date__lte=today
+        ).filter(
+            Q(end_date__isnull=True) | Q(end_date__gte=today)
+        ).order_by('-start_date').first()
+
+        if secondment_status:
+            return secondment_status
+
+        # ПРИОРИТЕТ 2: Обычные статусы (если нет прикомандирования)
         return EmployeeStatus.objects.filter(
             employee_id=employee_id,
             state=EmployeeStatus.StatusState.ACTIVE,
             start_date__lte=today
         ).filter(
             Q(end_date__isnull=True) | Q(end_date__gte=today)
-        ).first()
+        ).exclude(
+            status_type__in=[EmployeeStatus.StatusType.SECONDED_TO, EmployeeStatus.StatusType.SECONDED_FROM]
+        ).order_by('-start_date').first()
 
     def get_employee_status_history(
         self,

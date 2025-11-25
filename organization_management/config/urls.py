@@ -28,7 +28,7 @@ urlpatterns = [
     path("api/common/", include("organization_management.apps.common.api.urls")),
     path("api/staff_unit/", include("organization_management.apps.staff_unit.urls")),
     path("api/statuses/", include("organization_management.apps.statuses.api.urls")),
-    # path("api/secondments/", include("organization_management.apps.secondments.api.urls")),
+    path("api/secondments/", include("organization_management.apps.secondments.api.urls")),
     path("api/reports/", include("organization_management.apps.reports.api.urls")),
     path("api/notifications/", include("organization_management.apps.notifications.api.urls")),
     # path("api/audit/", include("organization_management.apps.audit.api.urls")),

@@ -16,8 +16,11 @@ RUN pip install --no-cache-dir -r requirements/development.txt
 
 # Copy project
 COPY . /app/
+COPY docker/entrypoint.sh /app/docker/entrypoint.sh
 
+RUN chmod +x /app/docker/entrypoint.sh
 # Collect static files
 RUN python manage.py collectstatic --noinput
 
 CMD ["gunicorn", "organization_management.config.wsgi:application", "--bind", "0.0.0.0:8000"]
+ENTRYPOINT ["/app/docker/entrypoint.sh"]

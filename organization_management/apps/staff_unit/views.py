@@ -570,19 +570,50 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
 
             # Employee с current_status
             if unit.employee:
-                current_status = unit.employee.statuses.order_by('-created_at').first()
+                from django.utils import timezone
+                from django.db.models import Q
+                today = timezone.now().date()
 
-                # Если у сотрудника нет статуса, создаем дефолтный "в строю"
+                # ПРИОРИТЕТ 1: Проверяем статусы прикомандирования (они имеют наивысший приоритет)
+                # Сначала проверяем откомандирован ли сотрудник (SECONDED_TO)
+                secondment_status = unit.employee.statuses.filter(
+                    status_type__in=[EmployeeStatus.StatusType.SECONDED_TO, EmployeeStatus.StatusType.SECONDED_FROM],
+                    state__in=[EmployeeStatus.StatusState.ACTIVE, EmployeeStatus.StatusState.PLANNED],
+                    start_date__lte=today
+                ).filter(
+                    Q(end_date__isnull=True) | Q(end_date__gte=today)
+                ).order_by('-start_date').first()
+
+                # Если есть статус прикомандирования - он имеет приоритет
+                if secondment_status:
+                    current_status = secondment_status
+                else:
+                    # ПРИОРИТЕТ 2: Обычные статусы (если нет прикомандирования)
+                    current_status = unit.employee.statuses.filter(
+                        Q(state=EmployeeStatus.StatusState.ACTIVE) | Q(state=EmployeeStatus.StatusState.PLANNED),
+                        start_date__lte=today
+                    ).filter(
+                        Q(end_date__isnull=True) | Q(end_date__gte=today)
+                    ).exclude(
+                        status_type__in=[EmployeeStatus.StatusType.SECONDED_TO, EmployeeStatus.StatusType.SECONDED_FROM]
+                    ).order_by('-start_date').first()
+
+                # Если у сотрудника нет активного статуса, создаем дефолтный "в строю"
                 if not current_status:
-                    from django.utils import timezone
-                    current_status = EmployeeStatus.objects.create(
-                        employee=unit.employee,
-                        status_type=EmployeeStatus.StatusType.IN_SERVICE,
-                        start_date=timezone.now().date(),
-                        state=EmployeeStatus.StatusState.ACTIVE,
-                        comment='Автоматически создан при отсутствии статуса',
-                        created_by=user
-                    )
+                    # Проверяем есть ли ЛЮБЫЕ статусы вообще (включая будущие)
+                    has_any_status = unit.employee.statuses.exists()
+
+                    # Создаем статус "В строю" только если нет вообще никаких статусов
+                    # Если есть хотя бы один статус (даже будущий), не создаем автоматически
+                    if not has_any_status:
+                        current_status = EmployeeStatus.objects.create(
+                            employee=unit.employee,
+                            status_type=EmployeeStatus.StatusType.IN_SERVICE,
+                            start_date=today,
+                            state=EmployeeStatus.StatusState.ACTIVE,
+                            comment='Автоматически создан при отсутствии статуса',
+                            created_by=user
+                        )
 
                 # Формируем photo_url
                 photo_url = None
