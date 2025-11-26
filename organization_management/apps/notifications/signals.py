@@ -12,7 +12,7 @@ from django.db.models.signals import post_save, post_delete
 from django.dispatch import receiver
 from django.contrib.auth.models import User
 from organization_management.apps.secondments.models import SecondmentRequest
-from organization_management.apps.statuses.models import EmployeeStatusLog
+# from organization_management.apps.statuses.models import EmployeeStatus
 from organization_management.apps.employees.models import Employee
 from .models import Notification
 
@@ -28,60 +28,106 @@ except Exception:
 # ✅ Сигнал только на SecondmentRequest
 @receiver(post_save, sender=SecondmentRequest, dispatch_uid="create_secondment_notification")
 def create_secondment_notification(sender, instance, created, **kwargs):
-    if created:
-        recipient = instance.approved_by or User.objects.filter(is_superuser=True).first()
-        if not recipient:
-            return
+    """
+    Отправляет уведомление при создании новой заявки на прикомандирование.
+    Уведомление отправляется пользователям, которые могут управлять принимающим подразделением (to_division).
+    """
+    if not created:
+        return
 
-        Notification.objects.create(
-            recipient=recipient,
+    from organization_management.apps.notifications.services.websocket_service import send_notification
+    from organization_management.apps.common.models import UserRole
+
+    # Находим пользователей, которые могут управлять to_division
+    # Учитываем как явное scope_division, так и автоматическое effective_scope_division
+    recipients = []
+
+    if instance.to_division:
+        # Находим управление для to_division
+        # Поднимаемся по иерархии до level=2 (управление)
+        management = instance.to_division
+        while management and management.level > 2:
+            management = management.parent
+
+        if management and management.level == 2:
+            # Собираем управление и его департамент (parent)
+            target_divisions = [management]
+            if management.parent and management.parent.level == 1:
+                target_divisions.append(management.parent)
+
+            # Вариант 1: Пользователи с явно заполненным scope_division
+            user_roles_explicit = UserRole.objects.filter(
+                scope_division__in=target_divisions
+            ).select_related('user')
+
+            # Вариант 2: Пользователи, чей employee.staff_unit.division совпадает с целевыми подразделениями
+            # (для случаев, когда scope_division=NULL и используется effective_scope_division)
+            from organization_management.apps.employees.models import Employee
+            user_roles_implicit = UserRole.objects.filter(
+                user__employee__staff_unit__division__in=target_divisions
+            ).select_related('user')
+
+            # Объединяем оба набора (используем set для удаления дубликатов)
+            recipient_users = set()
+            for ur in user_roles_explicit:
+                if ur.user:
+                    recipient_users.add(ur.user)
+            for ur in user_roles_implicit:
+                if ur.user:
+                    recipient_users.add(ur.user)
+
+            recipients = list(recipient_users)
+
+    # Если не нашли подходящих пользователей, отправляем superuser
+    if not recipients:
+        superuser = User.objects.filter(is_superuser=True).first()
+        if superuser:
+            recipients = [superuser]
+
+    # Отправляем уведомление каждому получателю
+    employee_name = f"{instance.employee.last_name} {instance.employee.first_name}"
+
+    for recipient in recipients:
+        send_notification(
+            recipient_id=recipient.id,
             notification_type=Notification.NotificationType.SECONDMENT_REQUEST,
-            title=f"New Secondment Request for {instance.employee.full_name}",
+            title=f"Новая заявка на прикомандирование: {employee_name}",
             message=(
-                f"A new secondment from {instance.from_division.name} to "
-                f"{instance.to_division.name} has been requested for {instance.employee.full_name}."
+                f"Поступила заявка на прикомандирование сотрудника {employee_name} "
+                f"из подразделения «{instance.from_division.name}» в ваше подразделение «{instance.to_division.name}». "
+                f"Период: {instance.start_date} - {instance.end_date}."
             ),
+            link=f"/api/secondments/secondment-requests/{instance.id}/",
             related_object_id=instance.id,
             related_model="SecondmentRequest",
-            payload={"secondment_request_id": instance.id, "employee_id": instance.employee.id},
+            payload={
+                "secondment_request_id": instance.id,
+                "employee_id": instance.employee.id,
+                "from_division_id": instance.from_division.id,
+                "to_division_id": instance.to_division.id,
+            },
         )
 
 
-# ✅ Сигнал только на EmployeeStatusLog
-@receiver(post_save, sender=EmployeeStatusLog, dispatch_uid="create_status_update_notification")
-def create_status_update_notification(sender, instance, created, **kwargs):
-    if not created or not instance.employee or not instance.employee.user:
-        return
-
-    Notification.objects.create(
-        recipient=instance.employee.user,
-        notification_type=Notification.NotificationType.STATUS_CHANGED,
-        title=f"Your status has been updated to {instance.get_status_display()}",
-        message=(
-            f'Your status has been updated to "{instance.get_status_display()}" '
-            f"from {instance.date_from}."
-        ),
-        related_object_id=instance.id,
-        related_model="EmployeeStatusLog",
-        payload={"status_log_id": instance.id, "new_status": instance.status},
-    )
-
-    if _has_channels:
-        try:
-            channel_layer = get_channel_layer()
-            async_to_sync(channel_layer.group_send)(
-                f"user_{instance.employee.user.id}_notifications",
-                {
-                    "type": "notification.message",
-                    "message": {
-                        "type": "status_update",
-                        "employee_id": instance.employee.id,
-                        "new_status": instance.status,
-                    },
-                },
-            )
-        except Exception:
-            pass
+# ❌ Закомментировано: EmployeeStatusLog не существует в текущей версии
+# TODO: Восстановить когда будет создана правильная модель
+# @receiver(post_save, sender=EmployeeStatus, dispatch_uid="create_status_update_notification")
+# def create_status_update_notification(sender, instance, created, **kwargs):
+#     if not created or not instance.employee or not instance.employee.user:
+#         return
+#
+#     Notification.objects.create(
+#         recipient=instance.employee.user,
+#         notification_type=Notification.NotificationType.STATUS_CHANGED,
+#         title=f"Your status has been updated to {instance.get_status_display()}",
+#         message=(
+#             f'Your status has been updated to "{instance.get_status_display()}" '
+#             f"from {instance.start_date}."
+#         ),
+#         related_object_id=instance.id,
+#         related_model="EmployeeStatus",
+#         payload={"status_id": instance.id, "new_status": instance.status_type},
+#     )
 
 
 # ✅ Сигнал только на Employee

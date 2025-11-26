@@ -64,8 +64,10 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         Returns:
             Response с кодом 204 при успехе
         """
+        from django.utils import timezone
         notification = self.get_object()
         notification.is_read = True
+        notification.read_at = timezone.now()
         notification.save()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -84,5 +86,6 @@ class NotificationViewSet(viewsets.ReadOnlyModelViewSet):
         Returns:
             Response с кодом 204 при успехе
         """
-        self.get_queryset().update(is_read=True)
+        from django.utils import timezone
+        self.get_queryset().update(is_read=True, read_at=timezone.now())
         return Response(status=status.HTTP_204_NO_CONTENT)

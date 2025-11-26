@@ -14,6 +14,7 @@ django-celery-beat
 channels
 channels-redis
 daphne
+uvicorn[standard]
 
 # Reporting
 python-docx

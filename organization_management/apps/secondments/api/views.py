@@ -209,6 +209,32 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
             created_by=request.user,
             comment=f"Прикомандирован из подразделения {instance.from_division_id}",
         )
+
+        # Отправляем уведомление создателю заявки
+        from organization_management.apps.notifications.services.websocket_service import send_notification
+        from organization_management.apps.notifications.models import Notification
+
+        # Отправляем уведомление пользователю, который создал заявку
+        if instance.requested_by:
+            send_notification(
+                recipient_id=instance.requested_by.id,
+                notification_type=Notification.NotificationType.SECONDMENT_APPROVED,
+                title=f"Заявка на прикомандирование одобрена: {instance.employee.full_name}",
+                message=(
+                    f"Ваша заявка на прикомандирование сотрудника {instance.employee.full_name} "
+                    f"в подразделение «{instance.to_division.name}» была одобрена. "
+                    f"Период: {instance.start_date} - {instance.end_date}."
+                ),
+                link=f"/api/secondments/secondment-requests/{instance.id}/",
+                related_object_id=instance.id,
+                related_model="SecondmentRequest",
+                payload={
+                    "secondment_request_id": instance.id,
+                    "employee_id": instance.employee.id,
+                    "approved_by": request.user.id,
+                },
+            )
+
         return Response(self.get_serializer(instance).data)
 
     @action(detail=True, methods=['post'])
@@ -243,33 +269,57 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
 
         instance.save()
 
-        # Отправка уведомлений
+        # Отправка уведомлений через WebSocket
+        from organization_management.apps.notifications.services.websocket_service import send_notification
+
         rejection_reason = instance.rejection_reason or 'Не указана'
 
-        # Уведомление создателю заявки
-        if instance.requested_by:
-            Notification.objects.create(
-                recipient=instance.requested_by,
-                notification_type=Notification.NotificationType.SECONDMENT_REJECTED,
-                title='Заявка на прикомандирование отклонена',
-                message=f'Ваша заявка на прикомандирование сотрудника {instance.employee} '
-                        f'из {instance.from_division} в {instance.to_division} '
+        # Уведомление создателю заявки (руководителю исходного подразделения)
+        if instance.from_division and hasattr(instance.from_division, 'head') and instance.from_division.head:
+            creator = instance.from_division.head.user if hasattr(instance.from_division.head, 'user') else None
+            if creator:
+                send_notification(
+                    recipient_id=creator.id,
+                    notification_type=Notification.NotificationType.SECONDMENT_REJECTED,
+                    title=f'Заявка на прикомандирование отклонена: {instance.employee.full_name}',
+                    message=(
+                        f'Ваша заявка на прикомандирование сотрудника {instance.employee.full_name} '
+                        f'из подразделения «{instance.from_division.name}» в «{instance.to_division.name}» '
                         f'на период с {instance.start_date} по {instance.end_date} отклонена. '
-                        f'Причина: {rejection_reason}',
-                link=f'/api/secondment-requests/{instance.id}/'
-            )
+                        f'Причина: {rejection_reason}'
+                    ),
+                    link=f'/api/secondments/secondment-requests/{instance.id}/',
+                    related_object_id=instance.id,
+                    related_model="SecondmentRequest",
+                    payload={
+                        "secondment_request_id": instance.id,
+                        "employee_id": instance.employee.id,
+                        "rejected_by": request.user.id,
+                        "rejection_reason": rejection_reason,
+                    },
+                )
 
         # Уведомление сотруднику (если у него есть пользователь)
         if hasattr(instance.employee, 'user') and instance.employee.user:
-            Notification.objects.create(
-                recipient=instance.employee.user,
+            send_notification(
+                recipient_id=instance.employee.user.id,
                 notification_type=Notification.NotificationType.SECONDMENT_REJECTED,
                 title='Заявка на ваше прикомандирование отклонена',
-                message=f'Заявка на ваше прикомандирование '
-                        f'из {instance.from_division} в {instance.to_division} '
-                        f'на период с {instance.start_date} по {instance.end_date} отклонена. '
-                        f'Причина: {rejection_reason}',
-                link=f'/api/secondment-requests/{instance.id}/'
+                message=(
+                    f'Заявка на ваше прикомандирование '
+                    f'из подразделения «{instance.from_division.name}» в «{instance.to_division.name}» '
+                    f'на период с {instance.start_date} по {instance.end_date} отклонена. '
+                    f'Причина: {rejection_reason}'
+                ),
+                link=f'/api/secondments/secondment-requests/{instance.id}/',
+                related_object_id=instance.id,
+                related_model="SecondmentRequest",
+                payload={
+                    "secondment_request_id": instance.id,
+                    "employee_id": instance.employee.id,
+                    "rejected_by": request.user.id,
+                    "rejection_reason": rejection_reason,
+                },
             )
 
         return Response(self.get_serializer(instance).data)
@@ -339,6 +389,58 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
         instance.status = SecondmentRequest.ApprovalStatus.CANCELLED
         instance.save()
 
+        # Отправляем уведомления о возврате сотрудника
+        from organization_management.apps.notifications.services.websocket_service import send_notification
+        from organization_management.apps.notifications.models import Notification
+
+        # Уведомление руководителю исходного подразделения (откомандировавшему)
+        if instance.from_division and hasattr(instance.from_division, 'head') and instance.from_division.head:
+            from_head = instance.from_division.head.user if hasattr(instance.from_division.head, 'user') else None
+            if from_head:
+                send_notification(
+                    recipient_id=from_head.id,
+                    notification_type=Notification.NotificationType.SECONDMENT_APPROVED,  # Используем APPROVED как положительное событие
+                    title=f'Сотрудник возвращен из прикомандирования: {instance.employee.full_name}',
+                    message=(
+                        f'Сотрудник {instance.employee.full_name} досрочно возвращен '
+                        f'из прикомандирования в подразделение «{instance.to_division.name}». '
+                        f'Дата возврата: {today}.'
+                    ),
+                    link=f'/api/secondments/secondment-requests/{instance.id}/',
+                    related_object_id=instance.id,
+                    related_model="SecondmentRequest",
+                    payload={
+                        "secondment_request_id": instance.id,
+                        "employee_id": instance.employee.id,
+                        "returned_date": str(today),
+                        "returned_by": request.user.id,
+                    },
+                )
+
+        # Уведомление руководителю принимающего подразделения
+        if instance.to_division and hasattr(instance.to_division, 'head') and instance.to_division.head:
+            to_head = instance.to_division.head.user if hasattr(instance.to_division.head, 'user') else None
+            if to_head:
+                send_notification(
+                    recipient_id=to_head.id,
+                    notification_type=Notification.NotificationType.SECONDMENT_APPROVED,
+                    title=f'Прикомандированный сотрудник возвращен: {instance.employee.full_name}',
+                    message=(
+                        f'Прикомандированный сотрудник {instance.employee.full_name} '
+                        f'досрочно возвращен в исходное подразделение «{instance.from_division.name}». '
+                        f'Дата возврата: {today}.'
+                    ),
+                    link=f'/api/secondments/secondment-requests/{instance.id}/',
+                    related_object_id=instance.id,
+                    related_model="SecondmentRequest",
+                    payload={
+                        "secondment_request_id": instance.id,
+                        "employee_id": instance.employee.id,
+                        "returned_date": str(today),
+                        "returned_by": request.user.id,
+                    },
+                )
+
         return Response({
             'status': 'сотрудник досрочно возвращен',
             'returned_date': today,
@@ -352,23 +454,40 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
     def incoming(self, request):
         """
         Список входящих запросов для текущего пользователя (принимающая сторона).
-        Показывает заявки где to_division в зоне ответственности пользователя.
+        Показывает ТОЛЬКО заявки со статусом PENDING, которые ожидают одобрения,
+        где to_division находится в управлении пользователя (определяется через employee).
         """
         user = request.user
 
-        # Проверяем наличие роли и подразделения
-        if not hasattr(user, 'role_info'):
+        # Получаем управление пользователя через его employee
+        user_department = None
+        if hasattr(user, 'employee') and user.employee:
+            if hasattr(user.employee, 'staff_unit') and user.employee.staff_unit:
+                # Поднимаемся до управления (DEPARTMENT)
+                user_department = self._get_department_root(user.employee.staff_unit.division)
+
+        # Если не удалось определить управление через employee, используем effective_scope_division
+        if not user_department:
+            if not hasattr(user, 'role_info'):
+                return Response([])
+
+            user_division = user.role_info.effective_scope_division
+            if not user_division:
+                return Response([])
+
+            user_department = self._get_department_root(user_division)
+
+        if not user_department:
             return Response([])
 
-        user_division = user.role_info.effective_scope_division
-        if not user_division:
-            return Response([])
+        # Получаем все дочерние подразделения управления
+        allowed = user_department.get_descendants(include_self=True)
 
-        # Получаем все дочерние подразделения
-        allowed = user_division.get_descendants(include_self=True)
-
-        # Фильтруем заявки где to_division в зоне ответственности
-        queryset = self.get_queryset().filter(to_division__in=allowed)
+        # Фильтруем заявки где to_division в управлении пользователя И статус PENDING
+        queryset = self.get_queryset().filter(
+            to_division__in=allowed,
+            status=SecondmentRequest.ApprovalStatus.PENDING
+        )
         serializer = self.get_serializer(queryset, many=True)
         return Response(serializer.data)
 
