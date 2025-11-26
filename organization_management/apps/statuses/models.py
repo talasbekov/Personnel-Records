@@ -182,6 +182,27 @@ class EmployeeStatus(models.Model):
                 'end_date': 'Для данного типа статуса требуется указать дату окончания.'
             })
 
+        # НОВАЯ ПРОВЕРКА: Для SECONDED_TO проверяем корректность related_division
+        if self.status_type == self.StatusType.SECONDED_TO:
+            if not self.related_division_id:
+                raise ValidationError({
+                    'related_division': 'Для статуса "Откомандирован" обязательно указать целевое подразделение.'
+                })
+
+            # Проверяем, что related_division НЕ совпадает с базовым подразделением сотрудника
+            if self.employee_id:
+                from organization_management.apps.employees.models import Employee
+                try:
+                    employee = Employee.objects.select_related('staff_unit__division').get(pk=self.employee_id)
+                    if hasattr(employee, 'staff_unit') and employee.staff_unit and employee.staff_unit.division:
+                        if employee.staff_unit.division.id == self.related_division_id:
+                            raise ValidationError({
+                                'related_division': 'Нельзя откомандировать сотрудника в его собственное подразделение. '
+                                                   f'Сотрудник уже работает в "{employee.staff_unit.division.name}".'
+                            })
+                except Employee.DoesNotExist:
+                    pass
+
         # Проверка максимальной длительности отпуска (по умолчанию 45 дней, настраивается)
         if self.status_type == self.StatusType.VACATION and self.start_date and self.end_date:
             max_vacation_days = getattr(settings, 'MAX_VACATION_DAYS', 45)
@@ -252,13 +273,32 @@ class EmployeeStatus(models.Model):
                     # Разрешаем пересечение статусов прикомандирования
                     continue
 
-                # ИСКЛЮЧЕНИЕ 4: Статусы прикомандирования имеют наивысший приоритет
-                # Они могут пересекаться с любыми другими статусами, так как показываются в первую очередь
-                # Это позволяет откомандированному сотруднику сохранять свой основной статус (например, "В строю")
-                # но при этом отображаться с приоритетным статусом "Откомандирован"
-                if is_self_secondment or is_other_secondment:
-                    # Разрешаем пересечение статусов прикомандирования с любыми другими статусами
+                # ИСКЛЮЧЕНИЕ 4: Статусы прикомандирования
+                # Разрешаем пересечение ТОЛЬКО между SECONDED_TO и SECONDED_FROM (они создаются парой)
+                if is_self_secondment and is_other_secondment:
+                    # Разрешаем пересечение только между статусами прикомандирования друг с другом
                     continue
+
+                # НОВОЕ ПРАВИЛО: Если у сотрудника есть активный SECONDED_TO (откомандирован),
+                # запрещаем создавать любые другие статусы в его домашнем подразделении
+                if not is_self_secondment and other_status.status_type == self.StatusType.SECONDED_TO:
+                    raise ValidationError({
+                        'start_date': f'Невозможно создать статус "{self.get_status_type_display()}", '
+                                     f'так как сотрудник откомандирован в другое подразделение '
+                                     f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
+                                     f'Сначала завершите или отмените откомандирование.'
+                    })
+
+                # НОВОЕ ПРАВИЛО: Если создаём SECONDED_TO, а у сотрудника есть другие активные статусы,
+                # запрещаем (кроме IN_SERVICE который будет автоматически завершён)
+                if self.status_type == self.StatusType.SECONDED_TO and not is_other_secondment:
+                    if other_status.status_type != self.StatusType.IN_SERVICE:
+                        raise ValidationError({
+                            'start_date': f'Невозможно откомандировать сотрудника, так как у него есть '
+                                         f'активный статус "{other_status.get_status_type_display()}" '
+                                         f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
+                                         f'Сначала завершите или отмените этот статус.'
+                        })
 
                 other_end = other_status.end_date or timezone.now().date() + timedelta(days=36500)
 

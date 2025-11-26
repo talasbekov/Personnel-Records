@@ -332,6 +332,14 @@ def generate_personnel_expense_report(department_id, report_date=None):
         period = f"{status.start_date.strftime('%d.%m.%Y') if status.start_date else ''} - {status.end_date.strftime('%d.%m.%Y') if status.end_date else ''}"
         head_training_list.append(f"{emp.last_name} {emp.first_name} ({period})")
 
+    def _dep_name(div):
+        if not div:
+            return "?"
+        dep = div
+        while dep and dep.level > 1:
+            dep = dep.parent
+        return dep.name if dep else div.name
+
     # Прикомандирован руководства
     head_seconded_from_statuses = get_employees_by_status_on_date(
         department.id,
@@ -343,7 +351,7 @@ def generate_personnel_expense_report(department_id, report_date=None):
     for status in head_seconded_from_statuses:
         emp = status.employee
         period = f"{status.start_date.strftime('%d.%m.%Y') if status.start_date else ''} - {status.end_date.strftime('%d.%m.%Y') if status.end_date else ''}"
-        from_div = status.related_division.name if status.related_division else "?"
+        from_div = _dep_name(status.related_division)
         head_seconded_from_list.append(f"{emp.last_name} {emp.first_name} ({period}, из {from_div})")
 
     # Откомандирован руководства
@@ -356,8 +364,8 @@ def generate_personnel_expense_report(department_id, report_date=None):
     head_seconded_to_list = []
     for status in head_seconded_to_statuses:
         emp = status.employee
-        period = f"{status.start_date.strftime('%d.%m.%Y') if status.start_date else ''} - {status.end_date.strftime('%d.%m.%Y') if status.end_date else ''}"
-        to_div = status.related_division.name if status.related_division else "?"
+        period = f"{status.start_date.strftime('%d.%м.%Y') if status.start_date else ''} - {status.end_date.strftime('%d.%м.%Y') if status.end_date else ''}"
+        to_div = _dep_name(status.related_division)
         head_seconded_to_list.append(f"{emp.last_name} {emp.first_name} ({period}, в {to_div})")
 
     # СТРОКА 4: Руководство - Название + Числа
@@ -548,33 +556,74 @@ def generate_personnel_expense_report(department_id, report_date=None):
             training_list.append(f"{emp.last_name} {emp.first_name} ({period})")
         total_training += training_count
 
-        # Прикомандирован
-        seconded_from_statuses = get_employees_by_status_on_date(
-            directorate_division_ids,
-            report_date,
-            EmployeeStatus.StatusType.SECONDED_FROM
+        # Определяем текущий департамент для этого управления
+        current_department = (
+            directorate.parent if directorate.parent and directorate.parent.level == 1
+            else directorate.get_ancestors(include_self=True).filter(level=1).first()
         )
-        seconded_from_count = seconded_from_statuses.count()
+
+        def _resolve_division_name(div):
+            """Если из нашего департамента — возвращаем управление, иначе имя департамента."""
+            if not div:
+                return "?"
+            dep = div
+            while dep and dep.level > 1:
+                dep = dep.parent
+
+            # Наш департамент: показываем управление
+            if current_department and dep and dep.id == current_department.id:
+                node = div
+                while node and node.level > 2:
+                    node = node.parent
+                return node.name if node else div.name  # управление (level=2) или исходное имя
+
+            # Чужой департамент: название департамента
+            return dep.name if dep else div.name
+
+        # Активный фильтр по датам/состоянию
+        status_filter = get_active_status_filter(report_date)
+
+        # Прикомандированы в наше управление (related_division ∈ наше управление; сотрудник из другого управления/департамента)
+        seconded_in_statuses = (
+            EmployeeStatus.objects
+            .filter(
+                status_type=EmployeeStatus.StatusType.SECONDED_TO,        # статус хранит целевое подразделение в related_division
+                related_division_id__in=directorate_division_ids,          # целевое подразделение — наше управление/подразделения
+            )
+            .exclude(employee__staff_unit__division_id__in=directorate_division_ids)  # сотрудник не из нашего управления
+            .filter(status_filter)
+            .select_related('employee', 'related_division')
+        )
+
+        seconded_from_count = seconded_in_statuses.count()
         seconded_from_list = []
-        for status in seconded_from_statuses:
+        for status in seconded_in_statuses:
             emp = status.employee
             period = f"{status.start_date.strftime('%d.%m.%Y') if status.start_date else ''} - {status.end_date.strftime('%d.%m.%Y') if status.end_date else ''}"
-            from_div = status.related_division.name if status.related_division else "?"
+            source_div = emp.staff_unit.division if getattr(emp, "staff_unit", None) and emp.staff_unit.division else None
+            from_div = _resolve_division_name(source_div)
             seconded_from_list.append(f"{emp.last_name} {emp.first_name} ({period}, из {from_div})")
         total_seconded_from += seconded_from_count
 
-        # Откомандирован
-        seconded_to_statuses = get_employees_by_status_on_date(
-            directorate_division_ids,
-            report_date,
-            EmployeeStatus.StatusType.SECONDED_TO
+        # Откомандированы из нашего управления (staff_unit ∈ наше управление; related_division — любое другое подразделение)
+        seconded_out_statuses = (
+            EmployeeStatus.objects
+            .filter(
+                status_type=EmployeeStatus.StatusType.SECONDED_TO,         # тот же тип, но смотрим на исходящее
+                employee__staff_unit__division_id__in=directorate_division_ids,
+            )
+            .exclude(related_division_id__in=directorate_division_ids)     # целевое подразделение не наше
+            .filter(status_filter)
+            .select_related('employee', 'related_division')
         )
-        seconded_to_count = seconded_to_statuses.count()
+
+        seconded_to_count = seconded_out_statuses.count()
         seconded_to_list = []
-        for status in seconded_to_statuses:
+        for status in seconded_out_statuses:
             emp = status.employee
             period = f"{status.start_date.strftime('%d.%m.%Y') if status.start_date else ''} - {status.end_date.strftime('%d.%m.%Y') if status.end_date else ''}"
-            to_div = status.related_division.name if status.related_division else "?"
+            target_div = status.related_division if status.related_division else None
+            to_div = _resolve_division_name(target_div)
             seconded_to_list.append(f"{emp.last_name} {emp.first_name} ({period}, в {to_div})")
         total_seconded_to += seconded_to_count
 
