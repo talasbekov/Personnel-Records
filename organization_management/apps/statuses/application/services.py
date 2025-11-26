@@ -450,19 +450,46 @@ class StatusApplicationService:
             end_date__lt=target_date
         )
 
+        # Получаем системного пользователя для автоматических операций
+        from django.contrib.auth.models import User
+        system_user = User.objects.filter(is_superuser=True).first()
+
         completed_statuses = []
         for status in expired_statuses:
+            old_pk = status.pk
             status.state = EmployeeStatus.StatusState.COMPLETED
             status.save()
             completed_statuses.append(status)
 
             # Автоматически создаем статус "В строю" после завершения
+            # ТОЛЬКО если у сотрудника не осталось других активных статусов
             if status.status_type != EmployeeStatus.StatusType.IN_SERVICE:
-                self.create_status(
+                # Проверяем есть ли другие активные статусы ПОСЛЕ завершения текущего
+                has_other_active = EmployeeStatus.objects.filter(
                     employee_id=status.employee_id,
-                    status_type=EmployeeStatus.StatusType.IN_SERVICE,
-                    start_date=status.end_date + timedelta(days=1)
-                )
+                    state__in=[EmployeeStatus.StatusState.ACTIVE, EmployeeStatus.StatusState.PLANNED]
+                ).exists()
+
+                # Создаем IN_SERVICE только если нет других активных статусов
+                if not has_other_active:
+                    # Используем текущую дату если end_date в прошлом
+                    new_start_date = max(
+                        status.end_date + timedelta(days=1),
+                        target_date
+                    )
+                    try:
+                        self.create_status(
+                            employee_id=status.employee_id,
+                            status_type=EmployeeStatus.StatusType.IN_SERVICE,
+                            start_date=new_start_date,
+                            user=system_user
+                        )
+                    except ValidationError as e:
+                        # Если не получилось создать IN_SERVICE - логируем но продолжаем
+                        logger.warning(
+                            f"Не удалось создать IN_SERVICE для сотрудника {status.employee_id} "
+                            f"после завершения статуса {old_pk}: {e}"
+                        )
 
         return completed_statuses
 

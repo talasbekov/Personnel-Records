@@ -4,6 +4,7 @@ Base Django settings for the organization_management project.
 import os
 from pathlib import Path
 from datetime import timedelta
+from celery.schedules import crontab
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -173,6 +174,32 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 CELERY_TIMEZONE = TIME_ZONE
+
+# Celery Beat Schedule - Периодические задачи
+CELERY_BEAT_SCHEDULE = {
+    # Применение запланированных статусов (каждый день в 00:01)
+    'apply-planned-statuses': {
+        'task': 'statuses.apply_planned_statuses',
+        'schedule': crontab(hour=0, minute=1),
+    },
+    # Завершение истекших статусов (каждый день в 00:05)
+    'complete-expired-statuses': {
+        'task': 'statuses.complete_expired_statuses',
+        'schedule': crontab(hour=0, minute=5),
+    },
+    # Уведомления о предстоящих статусах за 7 дней (каждый день в 09:00)
+    'send-upcoming-status-notifications': {
+        'task': 'statuses.send_upcoming_status_notifications',
+        'schedule': crontab(hour=9, minute=0),
+        'kwargs': {'days_before': 7},
+    },
+    # Уведомления о завершающихся статусах за 3 дня (каждый день в 09:30)
+    'send-ending-status-notifications': {
+        'task': 'statuses.send_ending_status_notifications',
+        'schedule': crontab(hour=9, minute=30),
+        'kwargs': {'days_before': 3},
+    },
+}
 
 # Channels Configuration (WebSocket)
 ASGI_APPLICATION = 'organization_management.config.asgi.application'

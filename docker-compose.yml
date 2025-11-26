@@ -17,8 +17,7 @@ services:
 
   web:
     build: .
-    entrypoint: ["/bin/sh", "/app/docker/entrypoint.sh"]
-    command: gunicorn organization_management.config.asgi:application --bind 0.0.0.0:8000 --workers 4 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --graceful-timeout 30 --keep-alive 5
+    command: sh -c "chmod +x /app/docker/entrypoint.sh && /app/docker/entrypoint.sh && gunicorn organization_management.config.asgi:application --bind 0.0.0.0:8000 --workers 4 --worker-class uvicorn.workers.UvicornWorker --timeout 120 --graceful-timeout 30 --keep-alive 5"
     volumes:
       - .:/app
       - ./staticfiles:/app/staticfiles
