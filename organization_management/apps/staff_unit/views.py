@@ -575,14 +575,49 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                 today = timezone.now().date()
 
                 # ПРИОРИТЕТ 1: Проверяем статусы прикомандирования (они имеют наивысший приоритет)
-                # Сначала проверяем откомандирован ли сотрудник (SECONDED_TO)
-                secondment_status = unit.employee.statuses.filter(
-                    status_type__in=[EmployeeStatus.StatusType.SECONDED_TO, EmployeeStatus.StatusType.SECONDED_FROM],
+                # Логика отображения зависит от того, из какого подразделения смотрим:
+                # - Исходное подразделение (staff_unit.division) → SECONDED_TO
+                # - Принимающее подразделение (related_division) → SECONDED_FROM
+
+                secondment_status = None
+
+                # Проверяем SECONDED_TO (откомандирован В другое подразделение)
+                seconded_to_status = unit.employee.statuses.filter(
+                    status_type=EmployeeStatus.StatusType.SECONDED_TO,
                     state__in=[EmployeeStatus.StatusState.ACTIVE, EmployeeStatus.StatusState.PLANNED],
                     start_date__lte=today
                 ).filter(
                     Q(end_date__isnull=True) | Q(end_date__gte=today)
                 ).order_by('-start_date').first()
+
+                # Проверяем SECONDED_FROM (прикомандирован ИЗ другого подразделения)
+                # Фильтруем по related_division, чтобы показывать только если сотрудник прикомандирован в наше дерево
+                seconded_from_status = unit.employee.statuses.filter(
+                    status_type=EmployeeStatus.StatusType.SECONDED_FROM,
+                    state__in=[EmployeeStatus.StatusState.ACTIVE, EmployeeStatus.StatusState.PLANNED],
+                    start_date__lte=today,
+                    related_division__in=all_divisions  # Прикомандирован из подразделений нашего дерева
+                ).filter(
+                    Q(end_date__isnull=True) | Q(end_date__gte=today)
+                ).order_by('-start_date').first()
+
+                # Определяем, какой статус показывать в зависимости от контекста просмотра
+                # Ключевая логика:
+                # - SECONDED_TO.related_division = подразделение КУДА отправлен сотрудник
+                # - SECONDED_FROM.related_division = подразделение ОТКУДА прикомандирован
+                # Если мы смотрим из подразделения КУДА отправлен → показываем SECONDED_FROM
+                # Если мы смотрим из другого подразделения → показываем SECONDED_TO
+
+                if seconded_to_status and seconded_to_status.related_division in all_divisions:
+                    # SECONDED_TO.related_division (подразделение куда отправлен) в нашем дереве
+                    # Значит мы смотрим из ПРИНИМАЮЩЕГО подразделения → показываем SECONDED_FROM
+                    secondment_status = seconded_from_status if seconded_from_status else seconded_to_status
+                elif seconded_to_status:
+                    # Смотрим НЕ из принимающего подразделения → показываем SECONDED_TO
+                    secondment_status = seconded_to_status
+                elif seconded_from_status:
+                    # Только SECONDED_FROM (fallback)
+                    secondment_status = seconded_from_status
 
                 # Если есть статус прикомандирования - он имеет приоритет
                 if secondment_status:

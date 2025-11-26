@@ -215,11 +215,19 @@ class EmployeeStatus(models.Model):
 
                 # ИСКЛЮЧЕНИЕ 1: Разрешаем пересечение с "В строю" для запланированных статусов
                 # так как "В строю" будет автоматически завершен при активации нового статуса
+                # Также разрешаем создание "В строю" при наличии запланированных статусов
                 is_planned_status = self.start_date > today
+                is_other_planned = other_status.start_date > today
+                is_self_in_service = self.status_type == self.StatusType.IN_SERVICE
                 is_other_in_service = other_status.status_type == self.StatusType.IN_SERVICE
 
+                # Случай 1: Создаем запланированный статус, а есть активный "В строю"
                 if is_planned_status and is_other_in_service:
-                    # Разрешаем создавать запланированные статусы при наличии активного "В строю"
+                    continue
+
+                # Случай 2: Создаем "В строю", а есть запланированные статусы в будущем
+                # "В строю" будет автоматически завершен когда запланированный статус активируется
+                if is_self_in_service and is_other_planned:
                     continue
 
                 # ИСКЛЮЧЕНИЕ 2: Разрешаем создание или редактирование статуса на сегодняшний день
@@ -242,6 +250,14 @@ class EmployeeStatus(models.Model):
 
                 if is_self_secondment and is_other_secondment:
                     # Разрешаем пересечение статусов прикомандирования
+                    continue
+
+                # ИСКЛЮЧЕНИЕ 4: Статусы прикомандирования имеют наивысший приоритет
+                # Они могут пересекаться с любыми другими статусами, так как показываются в первую очередь
+                # Это позволяет откомандированному сотруднику сохранять свой основной статус (например, "В строю")
+                # но при этом отображаться с приоритетным статусом "Откомандирован"
+                if is_self_secondment or is_other_secondment:
+                    # Разрешаем пересечение статусов прикомандирования с любыми другими статусами
                     continue
 
                 other_end = other_status.end_date or timezone.now().date() + timedelta(days=36500)
