@@ -726,3 +726,493 @@ def generate_personnel_expense_report(department_id, report_date=None):
     filename = f"расход_{department.name}_на_{date_str}.xlsx"
 
     return output, filename
+
+
+def generate_organization_report(report_date=None):
+    """
+    Генерирует отчет "Организация" по всем департаментам в памяти (динамически).
+
+    Args:
+        report_date: Дата для определения статусов сотрудников (datetime.date).
+                     Если None, используется текущая дата.
+
+    Returns:
+        tuple: (BytesIO объект с Excel файлом, имя файла)
+    """
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+
+    # Если дата не указана, используем текущую
+    if report_date is None:
+        from datetime import date
+        report_date = date.today()
+
+    # Создаем новый Excel файл
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Организация"
+
+    # Получаем все активные департаменты (level=1)
+    departments = Division.objects.filter(
+        level=1,
+        division_type=Division.DivisionType.DEPARTMENT,
+        is_active=True
+    ).order_by('name')
+
+    if not departments.exists():
+        raise ValueError('Департаменты не найдены')
+
+    # Стили для ячеек
+    header_font = Font(bold=True, size=11)
+    center_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+    left_alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+    border = Border(
+        left=Side(style='thin'),
+        right=Side(style='thin'),
+        top=Side(style='thin'),
+        bottom=Side(style='thin')
+    )
+    gray_fill = PatternFill(start_color='D3D3D3', end_color='D3D3D3', fill_type='solid')
+
+    # СТРОКА 1: Заголовок
+    ws.merge_cells('E1:P1')
+    cell = ws['E1']
+    cell.value = "Организация бөлімшелері бойынша саптық жазба"
+    cell.font = Font(bold=True, size=14)
+    cell.alignment = center_alignment
+
+    # СТРОКА 2: Дата
+    ws.merge_cells('E2:P2')
+    cell = ws['E2']
+    # Форматируем дату на казахском
+    from datetime import datetime
+    date_kz = datetime.strptime(str(report_date), '%Y-%m-%d')
+    months_kz = {
+        1: 'қаңтар', 2: 'ақпан', 3: 'наурыз', 4: 'сәуір', 5: 'мамыр', 6: 'маусым',
+        7: 'шілде', 8: 'тамыз', 9: 'қыркүйек', 10: 'қазан', 11: 'қараша', 12: 'желтоқсан'
+    }
+    cell.value = f"{date_kz.year} жылғы {date_kz.day} {months_kz[date_kz.month]}ға"
+    cell.font = Font(bold=True, size=12)
+    cell.alignment = center_alignment
+
+    # СТРОКА 3: Пустая для отступа
+
+    # СТРОКА 4: Заголовки таблицы
+    headers = [
+        ('A', '№ р/с'),
+        ('B', 'Бөлімшелер'),
+        ('D', 'Тізімге сәйкес'),
+        ('E', 'Сапта'),
+        ('F', 'Саптан тыс'),
+        ('G', 'Аты, жөні'),
+        ('J', 'Демалыста'),
+        ('K', 'Бала күтімі б/ша'),
+        ('L', 'Іссапарда'),
+        ('M', 'Изоляция'),
+        ('N', 'Ауруы б/ша'),
+        ('O', 'Жарыс жиын/ Оқуда'),
+        ('P', 'Баянат б/ша'),
+        ('Q', 'Жасақта'),
+        ('R', 'Тағылымдама')
+    ]
+
+    # Устанавливаем заголовки
+    for col_letter, header_text in headers:
+        col_num = ord(col_letter) - ord('A') + 1
+        cell = ws.cell(row=4, column=col_num)
+        cell.value = header_text
+        cell.font = header_font
+        cell.alignment = center_alignment
+        cell.border = border
+        cell.fill = gray_fill
+
+    # Объединяем ячейки для заголовков
+    ws.merge_cells('B4:C4')  # Бөлімшелер
+    ws.merge_cells('G4:I4')  # Аты, жөні
+
+    # Устанавливаем ширину столбцов
+    ws.column_dimensions['A'].width = 8
+    ws.column_dimensions['B'].width = 30
+    ws.column_dimensions['C'].width = 5
+    for col in ['D', 'E', 'F']:
+        ws.column_dimensions[col].width = 12
+    for col in ['G', 'H', 'I']:
+        ws.column_dimensions[col].width = 15
+    for col in ['J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R']:
+        ws.column_dimensions[col].width = 12
+
+    # Начальная строка для данных
+    current_row = 5
+
+    # Итоговые счетчики
+    total_staff = 0
+    total_in_service = 0
+    total_out_of_service = 0
+    total_vacation = 0
+    total_child_care = 0
+    total_business_trip = 0
+    total_isolation = 0
+    total_sick = 0
+    total_training_competition = 0
+    total_leave_by_report = 0
+    total_on_duty = 0
+    total_internship = 0
+
+    # Список ФИО руководства с нестандартными статусами
+    all_leadership_fio = []
+
+    # Фильтр для активных статусов
+    status_filter = get_active_status_filter(report_date)
+
+    # === ОБРАБОТКА РУКОВОДСТВА ОРГАНИЗАЦИИ (корневое подразделение) ===
+    # Получаем корневое подразделение (СГО РК, level=0)
+    root_division = Division.objects.filter(level=0, is_active=True).first()
+
+    if root_division:
+        row_num = 1
+
+        # Количество штатных единиц руководства
+        org_staff_count = StaffUnit.objects.filter(division_id=root_division.id).count()
+        total_staff += org_staff_count
+
+        # Количество сотрудников руководства
+        org_employees_count = StaffUnit.objects.filter(
+            division_id=root_division.id,
+            employee__isnull=False
+        ).count()
+
+        # Получаем сотрудников с любыми статусами кроме "в строю"
+        org_employees_with_other_statuses = EmployeeStatus.objects.filter(
+            employee__staff_unit__division_id=root_division.id
+        ).filter(status_filter).exclude(
+            status_type=EmployeeStatus.StatusType.IN_SERVICE
+        ).values_list('employee_id', flat=True).distinct()
+
+        # "В строю" = Все сотрудники - Сотрудники с другими статусами
+        org_in_service_count = org_employees_count - len(org_employees_with_other_statuses)
+        total_in_service += org_in_service_count
+
+        # "Саптан тыс" (вне строя)
+        org_out_of_service_count = len(org_employees_with_other_statuses)
+        total_out_of_service += org_out_of_service_count
+
+        # Получаем руководство с нестандартными статусами
+        org_leadership_statuses = EmployeeStatus.objects.filter(
+            employee__staff_unit__division_id=root_division.id
+        ).filter(status_filter).exclude(
+            status_type=EmployeeStatus.StatusType.IN_SERVICE
+        ).select_related('employee')
+
+        org_leadership_fio_list = []
+        for status in org_leadership_statuses:
+            emp = status.employee
+            status_label = status.get_status_type_display()
+            org_leadership_fio_list.append(f"{emp.last_name} {emp.first_name} ({status_label})")
+
+        org_leadership_fio = "; ".join(org_leadership_fio_list) if org_leadership_fio_list else ""
+        if org_leadership_fio_list:
+            all_leadership_fio.extend(org_leadership_fio_list)
+
+        # Считаем статусы по типам для руководства организации
+        org_vacation_count = get_employees_by_status_on_date(
+            root_division.id,
+            report_date,
+            EmployeeStatus.StatusType.VACATION
+        ).count()
+        total_vacation += org_vacation_count
+
+        org_child_care_count = get_employees_by_status_on_date(
+            root_division.id,
+            report_date,
+            EmployeeStatus.StatusType.CHILD_CARE
+        ).count()
+        total_child_care += org_child_care_count
+
+        org_business_trip_count = get_employees_by_status_on_date(
+            root_division.id,
+            report_date,
+            EmployeeStatus.StatusType.BUSINESS_TRIP
+        ).count()
+        total_business_trip += org_business_trip_count
+
+        org_isolation_count = get_employees_by_status_on_date(
+            root_division.id,
+            report_date,
+            EmployeeStatus.StatusType.ISOLATION
+        ).count()
+        total_isolation += org_isolation_count
+
+        org_sick_count = get_employees_by_status_on_date(
+            root_division.id,
+            report_date,
+            EmployeeStatus.StatusType.SICK_LEAVE
+        ).count()
+        total_sick += org_sick_count
+
+        org_training_competition_count = get_employees_by_status_on_date(
+            root_division.id,
+            report_date,
+            [EmployeeStatus.StatusType.TRAINING, EmployeeStatus.StatusType.COMPETITION]
+        ).count()
+        total_training_competition += org_training_competition_count
+
+        org_leave_by_report_count = get_employees_by_status_on_date(
+            root_division.id,
+            report_date,
+            EmployeeStatus.StatusType.LEAVE_BY_REPORT
+        ).count()
+        total_leave_by_report += org_leave_by_report_count
+
+        org_on_duty_count = get_employees_by_status_on_date(
+            root_division.id,
+            report_date,
+            EmployeeStatus.StatusType.ON_DUTY
+        ).count()
+        total_on_duty += org_on_duty_count
+
+        org_internship_count = get_employees_by_status_on_date(
+            root_division.id,
+            report_date,
+            EmployeeStatus.StatusType.INTERNSHIP
+        ).count()
+        total_internship += org_internship_count
+
+        # Записываем данные руководства организации
+        row_data = {
+            1: row_num,  # № р/с
+            2: "Организация басшылығы",  # Руководство организации
+            4: org_staff_count,  # Тізімге сәйкес
+            5: org_in_service_count,  # Сапта
+            6: org_out_of_service_count,  # Саптан тыс
+            7: org_leadership_fio,  # Аты, жөні
+            10: org_vacation_count,  # Демалыста
+            11: org_child_care_count,  # Бала күтімі б/ша
+            12: org_business_trip_count,  # Іссапарда
+            13: org_isolation_count,  # Изоляция
+            14: org_sick_count,  # Ауруы б/ша
+            15: org_training_competition_count,  # Жарыс жиын/ Оқуда
+            16: org_leave_by_report_count,  # Баянат б/ша
+            17: org_on_duty_count,  # Жасақта
+            18: org_internship_count  # Тағылымдама
+        }
+
+        for col_num, value in row_data.items():
+            cell = ws.cell(row=current_row, column=col_num)
+            cell.value = value
+            cell.border = border
+            if col_num in [1, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 17, 18]:
+                cell.alignment = center_alignment
+            else:
+                cell.alignment = left_alignment
+
+        # Объединяем ячейки для руководства организации
+        ws.merge_cells(f'B{current_row}:C{current_row}')
+        ws.merge_cells(f'G{current_row}:I{current_row}')
+
+        current_row += 1
+        row_num += 1
+    else:
+        # Если нет корневого подразделения, начинаем с 1
+        row_num = 1
+
+    # Обрабатываем каждый департамент
+    for department in departments:
+        # Получаем всех сотрудников департамента (включая подразделения)
+        dept_descendants = department.get_descendants(include_self=True)
+        dept_division_ids = list(dept_descendants.values_list('id', flat=True))
+
+        # Количество штатных единиц
+        staff_count = StaffUnit.objects.filter(
+            division_id__in=dept_division_ids
+        ).count()
+        total_staff += staff_count
+
+        # Количество сотрудников
+        employees_count = StaffUnit.objects.filter(
+            division_id__in=dept_division_ids,
+            employee__isnull=False
+        ).count()
+
+        # Получаем сотрудников с любыми статусами кроме "в строю"
+        employees_with_other_statuses = EmployeeStatus.objects.filter(
+            employee__staff_unit__division_id__in=dept_division_ids
+        ).filter(status_filter).exclude(
+            status_type=EmployeeStatus.StatusType.IN_SERVICE
+        ).values_list('employee_id', flat=True).distinct()
+
+        # "В строю" = Все сотрудники - Сотрудники с другими статусами
+        in_service_count = employees_count - len(employees_with_other_statuses)
+        total_in_service += in_service_count
+
+        # "Саптан тыс" (вне строя) = количество с нестандартными статусами
+        out_of_service_count = len(employees_with_other_statuses)
+        total_out_of_service += out_of_service_count
+
+        # Получаем руководство департамента (сотрудники напрямую в департаменте, не в управлениях)
+        # с нестандартными статусами
+        leadership_statuses = EmployeeStatus.objects.filter(
+            employee__staff_unit__division_id=department.id
+        ).filter(status_filter).exclude(
+            status_type=EmployeeStatus.StatusType.IN_SERVICE
+        ).select_related('employee')
+
+        leadership_fio_list = []
+        for status in leadership_statuses:
+            emp = status.employee
+            status_label = status.get_status_type_display()
+            leadership_fio_list.append(f"{emp.last_name} {emp.first_name} ({status_label})")
+
+        leadership_fio = "; ".join(leadership_fio_list) if leadership_fio_list else ""
+        if leadership_fio_list:
+            all_leadership_fio.extend(leadership_fio_list)
+
+        # Считаем статусы по типам
+        # Демалыста (отпуск)
+        vacation_count = get_employees_by_status_on_date(
+            dept_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.VACATION
+        ).count()
+        total_vacation += vacation_count
+
+        # Бала күтімі б/ша (уход за ребенком)
+        child_care_count = get_employees_by_status_on_date(
+            dept_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.CHILD_CARE
+        ).count()
+        total_child_care += child_care_count
+
+        # Іссапарда (командировка)
+        business_trip_count = get_employees_by_status_on_date(
+            dept_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.BUSINESS_TRIP
+        ).count()
+        total_business_trip += business_trip_count
+
+        # Изоляция
+        isolation_count = get_employees_by_status_on_date(
+            dept_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.ISOLATION
+        ).count()
+        total_isolation += isolation_count
+
+        # Ауруы б/ша (больничный)
+        sick_count = get_employees_by_status_on_date(
+            dept_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.SICK_LEAVE
+        ).count()
+        total_sick += sick_count
+
+        # Жарыс жиын/ Оқуда (соревнования/учеба)
+        training_competition_count = get_employees_by_status_on_date(
+            dept_division_ids,
+            report_date,
+            [EmployeeStatus.StatusType.TRAINING, EmployeeStatus.StatusType.COMPETITION]
+        ).count()
+        total_training_competition += training_competition_count
+
+        # Баянат б/ша (отпуск по рапорту)
+        leave_by_report_count = get_employees_by_status_on_date(
+            dept_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.LEAVE_BY_REPORT
+        ).count()
+        total_leave_by_report += leave_by_report_count
+
+        # Жасақта (дежурство)
+        on_duty_count = get_employees_by_status_on_date(
+            dept_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.ON_DUTY
+        ).count()
+        total_on_duty += on_duty_count
+
+        # Тағылымдама (стажировка)
+        internship_count = get_employees_by_status_on_date(
+            dept_division_ids,
+            report_date,
+            EmployeeStatus.StatusType.INTERNSHIP
+        ).count()
+        total_internship += internship_count
+
+        # Записываем данные департамента
+        row_data = {
+            1: row_num,  # № р/с
+            2: department.name,  # Бөлімшелер (B-C merged)
+            4: staff_count,  # Тізімге сәйкес
+            5: in_service_count,  # Сапта
+            6: out_of_service_count,  # Саптан тыс
+            7: leadership_fio,  # Аты, жөні (G-I merged)
+            10: vacation_count,  # Демалыста
+            11: child_care_count,  # Бала күтімі б/ша
+            12: business_trip_count,  # Іссапарда
+            13: isolation_count,  # Изоляция
+            14: sick_count,  # Ауруы б/ша
+            15: training_competition_count,  # Жарыс жиын/ Оқуда
+            16: leave_by_report_count,  # Баянат б/ша
+            17: on_duty_count,  # Жасақта
+            18: internship_count  # Тағылымдама
+        }
+
+        for col_num, value in row_data.items():
+            cell = ws.cell(row=current_row, column=col_num)
+            cell.value = value
+            cell.border = border
+            if col_num in [1, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 17, 18]:
+                cell.alignment = center_alignment
+            else:
+                cell.alignment = left_alignment
+
+        # Объединяем ячейки для департамента и ФИО
+        ws.merge_cells(f'B{current_row}:C{current_row}')
+        ws.merge_cells(f'G{current_row}:I{current_row}')
+
+        current_row += 1
+        row_num += 1
+
+    # ИТОГОВАЯ СТРОКА (БАРЛЫҒЫ)
+    ws.cell(row=current_row, column=1).value = ""
+    ws.cell(row=current_row, column=2).value = "БАРЛЫҒЫ"
+    ws.cell(row=current_row, column=4).value = total_staff
+    ws.cell(row=current_row, column=5).value = total_in_service
+    ws.cell(row=current_row, column=6).value = total_out_of_service
+    ws.cell(row=current_row, column=7).value = "; ".join(all_leadership_fio) if all_leadership_fio else ""
+    ws.cell(row=current_row, column=10).value = total_vacation
+    ws.cell(row=current_row, column=11).value = total_child_care
+    ws.cell(row=current_row, column=12).value = total_business_trip
+    ws.cell(row=current_row, column=13).value = total_isolation
+    ws.cell(row=current_row, column=14).value = total_sick
+    ws.cell(row=current_row, column=15).value = total_training_competition
+    ws.cell(row=current_row, column=16).value = total_leave_by_report
+    ws.cell(row=current_row, column=17).value = total_on_duty
+    ws.cell(row=current_row, column=18).value = total_internship
+
+    # Применяем стили к итоговой строке
+    for col_num in [1, 2, 4, 5, 6, 7, 10, 11, 12, 13, 14, 15, 16, 17, 18]:
+        cell = ws.cell(row=current_row, column=col_num)
+        cell.border = border
+        cell.font = Font(bold=True)
+        cell.fill = gray_fill
+        if col_num in [1, 4, 5, 6, 10, 11, 12, 13, 14, 15, 16, 17, 18]:
+            cell.alignment = center_alignment
+        else:
+            cell.alignment = left_alignment
+
+    # Объединяем ячейки для итоговой строки
+    ws.merge_cells(f'B{current_row}:C{current_row}')
+    ws.merge_cells(f'G{current_row}:I{current_row}')
+
+    # Сохраняем в память
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    # Формируем имя файла с датой отчета
+    date_str = report_date.strftime('%Y-%m-%d')
+    filename = f"организация_на_{date_str}.xlsx"
+
+    return output, filename

@@ -216,3 +216,71 @@ class ReportViewSet(viewsets.ModelViewSet):
                 {'detail': f'Ошибка при генерации отчета: {str(e)}'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
+
+    @extend_schema(
+        parameters=[
+            OpenApiParameter(
+                name='date',
+                type=OpenApiTypes.DATE,
+                location=OpenApiParameter.QUERY,
+                description='Дата для определения статусов сотрудников (формат: YYYY-MM-DD). Если не указана, используется текущая дата.',
+                required=False
+            )
+        ],
+        responses={
+            200: {
+                'type': 'string',
+                'format': 'binary',
+                'description': 'Excel файл отчета "Организация"'
+            }
+        }
+    )
+    @action(
+        detail=False,
+        methods=['get'],
+        url_path='organization',
+        permission_classes=[permissions.IsAuthenticated]
+    )
+    def organization(self, request):
+        """
+        Генерация и скачивание отчета "Организация" по всем департаментам.
+        GET /api/reports/reports/organization/?date=2025-11-27
+
+        Отчет включает данные по всем активным департаментам организации.
+        Опционально можно указать дату для определения статусов сотрудников.
+        """
+        # Получаем дату из query параметра или используем текущую
+        report_date = request.query_params.get('date')
+        if report_date:
+            from datetime import datetime
+            try:
+                report_date = datetime.strptime(report_date, '%Y-%m-%d').date()
+            except ValueError:
+                return Response(
+                    {'detail': 'Неверный формат даты. Используйте YYYY-MM-DD'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+        else:
+            from datetime import date
+            report_date = date.today()
+
+        # Генерируем отчет
+        try:
+            from organization_management.apps.reports.utils import generate_organization_report
+            file_buffer, filename = generate_organization_report(report_date)
+
+            response = FileResponse(
+                file_buffer,
+                as_attachment=True,
+                filename=filename,
+                content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            )
+            return response
+
+        except ValueError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            return Response(
+                {'detail': f'Ошибка при генерации отчета: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )

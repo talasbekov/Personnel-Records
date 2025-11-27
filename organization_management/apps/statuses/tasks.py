@@ -155,16 +155,13 @@ def send_upcoming_status_notification(status_id: int, days_before: int):
         ).get(pk=status_id)
 
         # Импортируем сервис уведомлений
-        from organization_management.apps.notifications.domain.models import (
-            NotificationType,
-            Notification
-        )
+        from organization_management.apps.notifications.models import Notification
 
         # Создаем уведомление для сотрудника
         if status.employee.user:
             notification = Notification.objects.create(
                 user=status.employee.user,
-                notification_type=NotificationType.STATUS_CHANGE,
+                notification_type=Notification.NotificationType.STATUS_CHANGE,
                 title=f"Предстоящее изменение статуса",
                 message=(
                     f"Через {days_before} дней ({status.start_date}) у вас будет установлен статус "
@@ -180,7 +177,7 @@ def send_upcoming_status_notification(status_id: int, days_before: int):
         if status.created_by and status.created_by != status.employee.user:
             Notification.objects.create(
                 user=status.created_by,
-                notification_type=NotificationType.STATUS_CHANGE,
+                notification_type=Notification.NotificationType.STATUS_CHANGE,
                 title=f"Напоминание о статусе сотрудника",
                 message=(
                     f"Через {days_before} дней ({status.start_date}) у сотрудника "
@@ -213,16 +210,13 @@ def send_status_applied_notification(status_id: int):
     try:
         status = EmployeeStatus.objects.select_related('employee').get(pk=status_id)
 
-        from organization_management.apps.notifications.domain.models import (
-            NotificationType,
-            Notification
-        )
+        from organization_management.apps.notifications.models import Notification
 
         # Уведомляем сотрудника
         if status.employee.user:
             Notification.objects.create(
                 user=status.employee.user,
-                notification_type=NotificationType.STATUS_CHANGE,
+                notification_type=Notification.NotificationType.STATUS_CHANGE,
                 title="Изменение статуса",
                 message=(
                     f"Ваш статус изменен на '{status.get_status_type_display()}' "
@@ -255,16 +249,13 @@ def send_status_completed_notification(status_id: int):
     try:
         status = EmployeeStatus.objects.select_related('employee').get(pk=status_id)
 
-        from organization_management.apps.notifications.domain.models import (
-            NotificationType,
-            Notification
-        )
+        from organization_management.apps.notifications.models import Notification
 
         # Уведомляем сотрудника
         if status.employee.user:
             Notification.objects.create(
                 user=status.employee.user,
-                notification_type=NotificationType.STATUS_CHANGE,
+                notification_type=Notification.NotificationType.STATUS_CHANGE,
                 title="Завершение статуса",
                 message=(
                     f"Ваш статус '{status.get_status_type_display()}' завершен. "
@@ -296,16 +287,13 @@ def send_status_extended_notification(status_id: int):
     try:
         status = EmployeeStatus.objects.select_related('employee', 'created_by').get(pk=status_id)
 
-        from organization_management.apps.notifications.domain.models import (
-            NotificationType,
-            Notification
-        )
+        from organization_management.apps.notifications.models import Notification
 
         # Уведомляем сотрудника
         if status.employee.user:
             Notification.objects.create(
                 user=status.employee.user,
-                notification_type=NotificationType.STATUS_CHANGE,
+                notification_type=Notification.NotificationType.STATUS_CHANGE,
                 title="Продление статуса",
                 message=(
                     f"Ваш статус '{status.get_status_type_display()}' продлен до {status.end_date}."
@@ -318,7 +306,7 @@ def send_status_extended_notification(status_id: int):
         if status.created_by and status.created_by != status.employee.user:
             Notification.objects.create(
                 user=status.created_by,
-                notification_type=NotificationType.STATUS_CHANGE,
+                notification_type=Notification.NotificationType.STATUS_CHANGE,
                 title="Продление статуса сотрудника",
                 message=(
                     f"Статус '{status.get_status_type_display()}' сотрудника "
@@ -415,16 +403,13 @@ def send_ending_status_notification(status_id: int, days_before: int):
             'related_division'
         ).get(pk=status_id)
 
-        from organization_management.apps.notifications.domain.models import (
-            NotificationType,
-            Notification
-        )
+        from organization_management.apps.notifications.models import Notification
 
         # Создаем уведомление для сотрудника
         if status.employee.user:
             notification = Notification.objects.create(
                 user=status.employee.user,
-                notification_type=NotificationType.STATUS_CHANGE,
+                notification_type=Notification.NotificationType.STATUS_CHANGE,
                 title=f"Скоро завершится статус",
                 message=(
                     f"Через {days_before} дней ({status.end_date}) завершится ваш статус "
@@ -440,7 +425,7 @@ def send_ending_status_notification(status_id: int, days_before: int):
         if status.created_by and status.created_by != status.employee.user:
             Notification.objects.create(
                 user=status.created_by,
-                notification_type=NotificationType.STATUS_CHANGE,
+                notification_type=Notification.NotificationType.STATUS_CHANGE,
                 title="Скоро завершится статус сотрудника",
                 message=(
                     f"Через {days_before} дней ({status.end_date}) завершится статус "

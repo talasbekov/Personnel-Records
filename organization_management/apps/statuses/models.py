@@ -19,6 +19,9 @@ class EmployeeStatus(models.Model):
         OTHER_ABSENCE   =   'other_absence',    'Отсутствие по иным причинам'
         ON_DUTY         =   'on_duty',          'На дежурстве'
         AFTER_DUTY      =   'after_duty',       'После дежурства'
+        CHILD_CARE      =   'child_care',       'Уход за ребенком'
+        ISOLATION       =   'isolation',        'Изоляция'
+        INTERNSHIP      =   'internship',       'Стажировка'
         SECONDED_FROM   =   'seconded_from',    'Прикомандирован из'
         SECONDED_TO     =   'seconded_to',      'Откомандирован в'
 
@@ -45,8 +48,8 @@ class EmployeeStatus(models.Model):
     state = models.CharField(
         max_length=20,
         choices=StatusState.choices,
-        default=StatusState.ACTIVE,
-        verbose_name='Состояние статуса'
+        verbose_name='Состояние статуса',
+        help_text='Автоматически определяется на основе дат при сохранении'
     )
 
     # Даты
@@ -216,7 +219,8 @@ class EmployeeStatus(models.Model):
 
         # Проверка пересечений с другими активными статусами
         # Запрещаем создавать пересекающиеся статусы для одного сотрудника
-        if self.employee_id and self.start_date:
+        # ВАЖНО: Пропускаем проверку для завершенных статусов
+        if self.employee_id and self.start_date and self.state != self.StatusState.COMPLETED:
             # Определяем конечную дату для проверки
             check_end_date = self.end_date or timezone.now().date() + timedelta(days=36500)  # 100 лет в будущее
 
@@ -300,16 +304,20 @@ class EmployeeStatus(models.Model):
                                          f'Сначала завершите или отмените этот статус.'
                         })
 
-                other_end = other_status.end_date or timezone.now().date() + timedelta(days=36500)
+                # ВАЖНО: Для НОВЫХ статусов пропускаем проверку на пересечение
+                # так как метод save() автоматически завершит/отменит пересекающиеся статусы
+                # Проверку оставляем только для редактирования существующих статусов
+                if self.pk is not None:  # Только для существующих статусов
+                    other_end = other_status.end_date or timezone.now().date() + timedelta(days=36500)
 
-                # Проверяем пересечение периодов
-                if not (check_end_date < other_status.start_date or self.start_date > other_end):
-                    raise ValidationError({
-                        'start_date': f'Период статуса пересекается с существующим статусом '
-                                     f'"{other_status.get_status_type_display()}" '
-                                     f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
-                                     f'Для одного сотрудника не может быть пересекающихся активных статусов.'
-                    })
+                    # Проверяем пересечение периодов
+                    if not (check_end_date < other_status.start_date or self.start_date > other_end):
+                        raise ValidationError({
+                            'start_date': f'Период статуса пересекается с существующим статусом '
+                                         f'"{other_status.get_status_type_display()}" '
+                                         f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
+                                         f'Для одного сотрудника не может быть пересекающихся активных статусов.'
+                        })
 
     def save(self, *args, **kwargs):
         """Переопределенный метод сохранения"""
@@ -339,6 +347,45 @@ class EmployeeStatus(models.Model):
                 self.state = self.StatusState.COMPLETED
             else:
                 self.state = self.StatusState.ACTIVE
+
+        # АВТОМАТИЧЕСКОЕ ЗАВЕРШЕНИЕ/ОТМЕНА ПЕРЕСЕКАЮЩИХСЯ СТАТУСОВ
+        # Только для новых статусов
+        if is_new and self.employee_id and self.start_date:
+            # Для статусов прикомандирования не завершаем другие статусы
+            if self.status_type not in [self.StatusType.SECONDED_FROM, self.StatusType.SECONDED_TO]:
+                # Определяем конечную дату для проверки пересечения
+                check_end_date = self.end_date or timezone.now().date() + timedelta(days=36500)
+
+                # Находим пересекающиеся статусы
+                overlapping = EmployeeStatus.objects.filter(
+                    employee_id=self.employee_id,
+                    state__in=[self.StatusState.ACTIVE, self.StatusState.PLANNED]
+                ).exclude(
+                    status_type__in=[self.StatusType.SECONDED_FROM, self.StatusType.SECONDED_TO]
+                )
+
+                for other_status in overlapping:
+                    other_end = other_status.end_date or timezone.now().date() + timedelta(days=36500)
+
+                    # Проверяем пересечение периодов
+                    if not (check_end_date < other_status.start_date or self.start_date > other_end):
+                        # Есть пересечение
+                        if other_status.state == self.StatusState.PLANNED:
+                            # Отменяем запланированный статус
+                            other_status.state = self.StatusState.CANCELLED
+                            other_status.early_termination_reason = f"Автоматически отменен из-за создания нового статуса '{self.status_type}' на {self.start_date}"
+                            other_status.save()
+                        elif other_status.state == self.StatusState.ACTIVE:
+                            # Завершаем активный статус
+                            # Завершаем днем раньше начала нового статуса
+                            termination_date = max(
+                                other_status.start_date,
+                                self.start_date - timedelta(days=1)
+                            )
+                            other_status.actual_end_date = termination_date
+                            other_status.state = self.StatusState.COMPLETED
+                            other_status.early_termination_reason = f"Автоматически завершен при создании нового статуса '{self.status_type}'"
+                            other_status.save()
 
         self.full_clean()
         super().save(*args, **kwargs)

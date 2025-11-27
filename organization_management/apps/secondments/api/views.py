@@ -185,15 +185,12 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
         # ====================================================================
 
         # Откомандирован в (для собственного подразделения)
-        today = timezone.now().date()
-        seconded_to_state = EmployeeStatus.StatusState.PLANNED if instance.start_date > today else EmployeeStatus.StatusState.ACTIVE
-
+        # state определяется автоматически в save() на основе start_date
         EmployeeStatus.objects.create(
             employee_id=instance.employee_id,
             status_type=EmployeeStatus.StatusType.SECONDED_TO,
             start_date=instance.start_date,
             end_date=instance.end_date,
-            state=seconded_to_state,
             related_division_id=instance.to_division_id,
             created_by=request.user,
             comment=f"Откомандирован в подразделение {instance.to_division_id}",
@@ -204,7 +201,6 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
             status_type=EmployeeStatus.StatusType.SECONDED_FROM,
             start_date=instance.start_date,
             end_date=instance.end_date,
-            state=seconded_to_state,  # Тот же state что и SECONDED_TO
             related_division_id=instance.from_division_id,
             created_by=request.user,
             comment=f"Прикомандирован из подразделения {instance.from_division_id}",
@@ -219,9 +215,9 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
             send_notification(
                 recipient_id=instance.requested_by.id,
                 notification_type=Notification.NotificationType.SECONDMENT_APPROVED,
-                title=f"Заявка на прикомандирование одобрена: {instance.employee.full_name}",
+                title=f"Заявка на прикомандирование одобрена: {str(instance.employee)}",
                 message=(
-                    f"Ваша заявка на прикомандирование сотрудника {instance.employee.full_name} "
+                    f"Ваша заявка на прикомандирование сотрудника {str(instance.employee)} "
                     f"в подразделение «{instance.to_division.name}» была одобрена. "
                     f"Период: {instance.start_date} - {instance.end_date}."
                 ),
@@ -281,9 +277,9 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
                 send_notification(
                     recipient_id=creator.id,
                     notification_type=Notification.NotificationType.SECONDMENT_REJECTED,
-                    title=f'Заявка на прикомандирование отклонена: {instance.employee.full_name}',
+                    title=f'Заявка на прикомандирование отклонена: {str(instance.employee)}',
                     message=(
-                        f'Ваша заявка на прикомандирование сотрудника {instance.employee.full_name} '
+                        f'Ваша заявка на прикомандирование сотрудника {str(instance.employee)} '
                         f'из подразделения «{instance.from_division.name}» в «{instance.to_division.name}» '
                         f'на период с {instance.start_date} по {instance.end_date} отклонена. '
                         f'Причина: {rejection_reason}'
@@ -400,9 +396,9 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
                 send_notification(
                     recipient_id=from_head.id,
                     notification_type=Notification.NotificationType.SECONDMENT_APPROVED,  # Используем APPROVED как положительное событие
-                    title=f'Сотрудник возвращен из прикомандирования: {instance.employee.full_name}',
+                    title=f'Сотрудник возвращен из прикомандирования: {str(instance.employee)}',
                     message=(
-                        f'Сотрудник {instance.employee.full_name} досрочно возвращен '
+                        f'Сотрудник {str(instance.employee)} досрочно возвращен '
                         f'из прикомандирования в подразделение «{instance.to_division.name}». '
                         f'Дата возврата: {today}.'
                     ),
@@ -424,9 +420,9 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
                 send_notification(
                     recipient_id=to_head.id,
                     notification_type=Notification.NotificationType.SECONDMENT_APPROVED,
-                    title=f'Прикомандированный сотрудник возвращен: {instance.employee.full_name}',
+                    title=f'Прикомандированный сотрудник возвращен: {str(instance.employee)}',
                     message=(
-                        f'Прикомандированный сотрудник {instance.employee.full_name} '
+                        f'Прикомандированный сотрудник {str(instance.employee)} '
                         f'досрочно возвращен в исходное подразделение «{instance.from_division.name}». '
                         f'Дата возврата: {today}.'
                     ),

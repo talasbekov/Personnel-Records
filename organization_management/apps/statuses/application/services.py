@@ -1,12 +1,15 @@
 """
 Сервисный слой для управления статусами сотрудников
 """
+import logging
 from datetime import date, timedelta
 from typing import Optional, List, Dict, Any
 from django.db import transaction
 from django.db.models import Q, QuerySet
 from django.core.exceptions import ValidationError
 from django.utils import timezone
+
+logger = logging.getLogger(__name__)
 
 from organization_management.apps.statuses.models import (
     EmployeeStatus,
@@ -415,23 +418,60 @@ class StatusApplicationService:
 
         applied_statuses = []
         for status in planned_statuses:
-            status.state = EmployeeStatus.StatusState.ACTIVE
-            status.auto_applied = True
-            status.save()
-            applied_statuses.append(status)
+            try:
+                # ВАЖНО: Автоматически завершаем текущий активный статус IN_SERVICE
+                # перед активацией запланированного статуса
+                if status.status_type not in [EmployeeStatus.StatusType.SECONDED_FROM, EmployeeStatus.StatusType.SECONDED_TO]:
+                    current_in_service = EmployeeStatus.objects.filter(
+                        employee_id=status.employee_id,
+                        state=EmployeeStatus.StatusState.ACTIVE,
+                        status_type=EmployeeStatus.StatusType.IN_SERVICE
+                    ).exclude(
+                        status_type__in=[EmployeeStatus.StatusType.SECONDED_FROM, EmployeeStatus.StatusType.SECONDED_TO]
+                    )
 
-            # Создаем запись в истории
-            StatusChangeHistory.objects.create(
-                status=status,
-                change_type=StatusChangeHistory.ChangeType.MODIFIED,
-                old_value='planned',
-                new_value='active',
-                comment='Статус применен автоматически'
-            )
+                    for current_status in current_in_service:
+                        # Завершаем IN_SERVICE датой, предшествующей новому статусу
+                        # ВАЖНО: actual_end_date не может быть раньше start_date самого IN_SERVICE
+                        end_date = max(
+                            current_status.start_date,
+                            status.start_date - timedelta(days=1)
+                        )
+                        current_status.actual_end_date = end_date
+                        current_status.state = EmployeeStatus.StatusState.COMPLETED
+                        current_status.early_termination_reason = f"Автоматически завершен при активации запланированного статуса '{status.status_type}'"
+                        current_status.save()
+
+                        # Создаем запись в истории
+                        StatusChangeHistory.objects.create(
+                            status=current_status,
+                            change_type=StatusChangeHistory.ChangeType.TERMINATED,
+                            changed_by=None,
+                            comment=f"Автоматически завершен при активации запланированного статуса"
+                        )
+
+                status.state = EmployeeStatus.StatusState.ACTIVE
+                status.auto_applied = True
+                status.save()
+                applied_statuses.append(status)
+
+                # Создаем запись в истории
+                StatusChangeHistory.objects.create(
+                    status=status,
+                    change_type=StatusChangeHistory.ChangeType.MODIFIED,
+                    old_value='planned',
+                    new_value='active',
+                    comment='Статус применен автоматически'
+                )
+            except ValidationError as e:
+                # Если не получилось применить статус - логируем но продолжаем
+                logger.warning(
+                    f"Не удалось применить запланированный статус {status.id} "
+                    f"для сотрудника {status.employee_id}: {e}"
+                )
 
         return applied_statuses
 
-    @transaction.atomic
     def complete_expired_statuses(self, target_date: Optional[date] = None) -> List[EmployeeStatus]:
         """
         Завершение статусов, срок которых истек

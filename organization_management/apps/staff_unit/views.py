@@ -549,6 +549,32 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
             )
         ).order_by('division__tree_id', 'division__lft', 'position__level', 'index')
 
+        # Получаем прикомандированных сотрудников (SECONDED_TO в наше подразделение)
+        from django.utils import timezone
+        from django.db.models import Q
+        today = timezone.now().date()
+
+        seconded_employees = Employee.objects.filter(
+            statuses__status_type=EmployeeStatus.StatusType.SECONDED_TO,
+            statuses__related_division__in=all_divisions,
+            statuses__state__in=[EmployeeStatus.StatusState.ACTIVE, EmployeeStatus.StatusState.PLANNED],
+            statuses__start_date__lte=today
+        ).filter(
+            Q(statuses__end_date__isnull=True) | Q(statuses__end_date__gte=today)
+        ).exclude(
+            # Исключаем тех, кто уже есть в наших штатных единицах
+            staff_unit__division__in=all_divisions
+        ).distinct().select_related(
+            'staff_unit__division', 'staff_unit__position'
+        ).prefetch_related(
+            Prefetch(
+                'statuses',
+                queryset=EmployeeStatus.objects.filter(
+                    state__in=[EmployeeStatus.StatusState.ACTIVE, EmployeeStatus.StatusState.PLANNED]
+                ).order_by('-start_date')
+            )
+        )
+
         # Создаем плоский список с полной информацией (БЕЗ children)
         result = []
         for unit in staff_units:
@@ -675,6 +701,58 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                 }
 
             result.append(unit_data)
+
+        # Добавляем прикомандированных сотрудников (без штатной единицы в нашем подразделении)
+        for employee in seconded_employees:
+            # Находим активный статус SECONDED_TO для этого сотрудника в наше подразделение
+            seconded_to_status = employee.statuses.filter(
+                status_type=EmployeeStatus.StatusType.SECONDED_TO,
+                related_division__in=all_divisions,
+                state__in=[EmployeeStatus.StatusState.ACTIVE, EmployeeStatus.StatusState.PLANNED],
+                start_date__lte=today
+            ).filter(
+                Q(end_date__isnull=True) | Q(end_date__gte=today)
+            ).order_by('-start_date').first()
+
+            if seconded_to_status:
+                # Формируем photo_url
+                photo_url = None
+                if employee.photo:
+                    photo_url = request.build_absolute_uri(employee.photo.url)
+
+                # Создаем виртуальную запись для прикомандированного сотрудника
+                unit_data = {
+                    'id': None,  # Нет штатной единицы в нашем подразделении
+                    'division': {
+                        'id': seconded_to_status.related_division.id,
+                        'name': seconded_to_status.related_division.name,
+                    } if seconded_to_status.related_division else None,
+                    'position': {
+                        'id': employee.staff_unit.position.id,
+                        'name': employee.staff_unit.position.name,
+                        'level': employee.staff_unit.position.level,
+                    } if employee.staff_unit and employee.staff_unit.position else None,
+                    'employee': {
+                        'id': employee.id,
+                        'first_name': employee.first_name,
+                        'last_name': employee.last_name,
+                        'current_status': {
+                            'status_type': EmployeeStatus.StatusType.SECONDED_FROM,  # Показываем SECONDED_FROM для принимающего подразделения
+                            'state': seconded_to_status.state,
+                        },
+                        'photo': employee.photo.url if employee.photo else None,
+                        'photo_url': photo_url,
+                        'is_seconded': True,  # Флаг что это прикомандированный сотрудник
+                        'original_division': {
+                            'id': employee.staff_unit.division.id,
+                            'name': employee.staff_unit.division.name,
+                        } if employee.staff_unit and employee.staff_unit.division else None,
+                    },
+                    'vacancy': None,
+                    'index': 999,  # Ставим в конец списка
+                }
+
+                result.append(unit_data)
 
         return Response({
             'division': {
