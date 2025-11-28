@@ -105,15 +105,33 @@ class EmployeeStatusViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
 
         try:
+            acting_division_id = None
+            if hasattr(request.user, 'role_info') and request.user.role_info.effective_scope_division:
+                acting_division_id = request.user.role_info.effective_scope_division.id
+
+            # Получаем данные с безопасным доступом
+            employee = serializer.validated_data.get('employee')
+            if not employee:
+                return Response({'error': 'Поле employee обязательно'}, status=status.HTTP_400_BAD_REQUEST)
+
+            status_type = serializer.validated_data.get('status_type')
+            if not status_type:
+                return Response({'error': 'Поле status_type обязательно'}, status=status.HTTP_400_BAD_REQUEST)
+
+            start_date = serializer.validated_data.get('start_date')
+            if not start_date:
+                return Response({'error': 'Поле start_date обязательно'}, status=status.HTTP_400_BAD_REQUEST)
+
             status_obj = self.service.create_status(
-                employee_id=serializer.validated_data['employee'].id,
-                status_type=serializer.validated_data['status_type'],
-                start_date=serializer.validated_data['start_date'],
+                employee_id=employee.id,
+                status_type=status_type,
+                start_date=start_date,
                 end_date=serializer.validated_data.get('end_date'),
                 comment=serializer.validated_data.get('comment', ''),
                 location=serializer.validated_data.get('location', ''),
                 related_division_id=serializer.validated_data.get('related_division').id if serializer.validated_data.get('related_division') else None,
-                user=request.user
+                user=request.user,
+                acting_division_id=acting_division_id
             )
             output_serializer = EmployeeStatusSerializer(status_obj, context={'request': request})
             return Response(output_serializer.data, status=status.HTTP_201_CREATED)

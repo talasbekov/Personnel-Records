@@ -103,10 +103,43 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
                     )
 
         # Сохраняем заявку с from_division (автоматически определенным или указанным вручную)
-        serializer.save(
+        instance = serializer.save(
             requested_by=user,
             from_division=from_division
         )
+
+        # Отправляем уведомление руководителю принимающего подразделения
+        from organization_management.apps.notifications.services.websocket_service import send_notification
+        from organization_management.apps.notifications.models import Notification
+
+        to_division = instance.to_division
+        # Находим руководителя принимающего подразделения (или управления)
+        if to_division:
+            # Поднимаемся до управления (DEPARTMENT)
+            department = self._get_department_root(to_division)
+            if department and hasattr(department, 'head') and department.head:
+                head_user = department.head.user if hasattr(department.head, 'user') else None
+                if head_user:
+                    send_notification(
+                        recipient_id=head_user.id,
+                        notification_type=Notification.NotificationType.STATUS_CREATED,
+                        title=f"Новая заявка на прикомандирование: {str(instance.employee)}",
+                        message=(
+                            f"Поступила заявка на прикомандирование сотрудника {str(instance.employee)} "
+                            f"из подразделения «{from_division.name}» в «{to_division.name}». "
+                            f"Период: {instance.start_date} - {instance.end_date}. "
+                            f"Требуется ваше одобрение."
+                        ),
+                        link=f"/api/secondments/secondment-requests/{instance.id}/",
+                        related_object_id=instance.id,
+                        related_model="SecondmentRequest",
+                        payload={
+                            "secondment_request_id": instance.id,
+                            "employee_id": instance.employee.id,
+                            "requested_by": user.id,
+                            "action_required": "approval"
+                        },
+                    )
 
     @action(detail=True, methods=['post'])
     def approve(self, request, pk=None):
@@ -186,6 +219,9 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
 
         # Откомандирован в (для собственного подразделения)
         # state определяется автоматически в save() на основе start_date
+        # ВАЖНО: Создаем через ORM напрямую, минуя сервисный слой
+        # так как сервисный слой блокирует создание статусов прикомандирования
+        # Статусы прикомандирования создаются ТОЛЬКО через систему одобрений
         EmployeeStatus.objects.create(
             employee_id=instance.employee_id,
             status_type=EmployeeStatus.StatusType.SECONDED_TO,
@@ -384,6 +420,29 @@ class SecondmentRequestViewSet(viewsets.ModelViewSet):
         # Обновляем статус заявки
         instance.status = SecondmentRequest.ApprovalStatus.CANCELLED
         instance.save()
+
+        # ВАЖНО: Автоматически создаем статус "В строю" после возврата сотрудника
+        # Проверяем что у сотрудника нет других активных статусов
+        has_other_active = EmployeeStatus.objects.filter(
+            employee_id=instance.employee_id,
+            state__in=[EmployeeStatus.StatusState.ACTIVE, EmployeeStatus.StatusState.PLANNED]
+        ).exclude(
+            # Исключаем только что завершенные статусы прикомандирования
+            pk__in=[
+                secondment_to_status.pk if secondment_to_status else None,
+                secondment_from_status.pk if secondment_from_status else None
+            ]
+        ).exists()
+
+        # Создаем "В строю" только если нет других активных статусов
+        if not has_other_active:
+            EmployeeStatus.objects.create(
+                employee_id=instance.employee_id,
+                status_type=EmployeeStatus.StatusType.IN_SERVICE,
+                start_date=today,
+                created_by=request.user,
+                comment="Автоматически создан после возврата из прикомандирования"
+            )
 
         # Отправляем уведомления о возврате сотрудника
         from organization_management.apps.notifications.services.websocket_service import send_notification

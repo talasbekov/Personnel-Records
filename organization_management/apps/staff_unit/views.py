@@ -646,8 +646,19 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                     secondment_status = seconded_from_status
 
                 # Если есть статус прикомандирования - он имеет приоритет
+                local_status = None
                 if secondment_status:
                     current_status = secondment_status
+
+                    # Для прикомандированных сотрудников ищем ЛОКАЛЬНЫЙ статус (не прикомандирование)
+                    local_status = unit.employee.statuses.filter(
+                        Q(state=EmployeeStatus.StatusState.ACTIVE) | Q(state=EmployeeStatus.StatusState.PLANNED),
+                        start_date__lte=today
+                    ).filter(
+                        Q(end_date__isnull=True) | Q(end_date__gte=today)
+                    ).exclude(
+                        status_type__in=[EmployeeStatus.StatusType.SECONDED_TO, EmployeeStatus.StatusType.SECONDED_FROM]
+                    ).order_by('-start_date').first()
                 else:
                     # ПРИОРИТЕТ 2: Обычные статусы (если нет прикомандирования)
                     current_status = unit.employee.statuses.filter(
@@ -689,6 +700,10 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                         'status_type': current_status.status_type,
                         'state': current_status.state,
                     } if current_status else None,
+                    'local_status': {
+                        'status_type': local_status.status_type,
+                        'state': local_status.state,
+                    } if local_status else None,
                     'photo': unit.employee.photo.url if unit.employee.photo else None,
                     'photo_url': photo_url
                 }
@@ -715,6 +730,16 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
             ).order_by('-start_date').first()
 
             if seconded_to_status:
+                # Ищем локальный статус для прикомандированного сотрудника
+                local_status_for_seconded = employee.statuses.filter(
+                    Q(state=EmployeeStatus.StatusState.ACTIVE) | Q(state=EmployeeStatus.StatusState.PLANNED),
+                    start_date__lte=today
+                ).filter(
+                    Q(end_date__isnull=True) | Q(end_date__gte=today)
+                ).exclude(
+                    status_type__in=[EmployeeStatus.StatusType.SECONDED_TO, EmployeeStatus.StatusType.SECONDED_FROM]
+                ).order_by('-start_date').first()
+
                 # Формируем photo_url
                 photo_url = None
                 if employee.photo:
@@ -740,6 +765,10 @@ class StaffUnitViewSet(viewsets.ModelViewSet):
                             'status_type': EmployeeStatus.StatusType.SECONDED_FROM,  # Показываем SECONDED_FROM для принимающего подразделения
                             'state': seconded_to_status.state,
                         },
+                        'local_status': {
+                            'status_type': local_status_for_seconded.status_type,
+                            'state': local_status_for_seconded.state,
+                        } if local_status_for_seconded else None,
                         'photo': employee.photo.url if employee.photo else None,
                         'photo_url': photo_url,
                         'is_seconded': True,  # Флаг что это прикомандированный сотрудник

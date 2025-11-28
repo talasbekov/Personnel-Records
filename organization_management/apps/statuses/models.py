@@ -22,8 +22,8 @@ class EmployeeStatus(models.Model):
         CHILD_CARE      =   'child_care',       'Уход за ребенком'
         ISOLATION       =   'isolation',        'Изоляция'
         INTERNSHIP      =   'internship',       'Стажировка'
-        SECONDED_FROM   =   'seconded_from',    'Прикомандирован из'
-        SECONDED_TO     =   'seconded_to',      'Откомандирован в'
+        SECONDED_FROM   =   'seconded_from',    'Прикомандирован'
+        SECONDED_TO     =   'seconded_to',      'Откомандирован'
 
     class StatusState(models.TextChoices):
         PLANNED = 'planned', 'Запланирован'
@@ -135,31 +135,220 @@ class EmployeeStatus(models.Model):
     def __str__(self):
         return f"{self.employee} - {self.get_status_type_display()} ({self.start_date})"
 
+    # def clean(self):
+    #     """Валидация модели"""
+    #     # Проверка корректности интервала дат
+    #     if self.end_date and self.end_date < self.start_date:
+    #         raise ValidationError({
+    #             'end_date': "Дата окончания не может быть раньше даты начала."
+    #         })
+    #
+    #     # Проверка фактической даты окончания
+    #     if self.actual_end_date:
+    #         # Для досрочного завершения actual_end_date может быть раньше end_date - это нормально
+    #         # Проверяем только что actual_end_date не раньше start_date
+    #         if self.actual_end_date < self.start_date:
+    #             raise ValidationError({
+    #                 'actual_end_date': "Фактическая дата окончания не может быть раньше даты начала."
+    #             })
+    #         # Убрали проверку actual_end_date > end_date, так как при автозавершении
+    #         # старых статусов actual_end_date специально ставится раньше end_date
+    #
+    #     # Проверка, что дата начала не в прошлом (только для новых статусов)
+    #     today = timezone.now().date()
+    #     if not self.pk and self.start_date and self.start_date < today:
+    #         raise ValidationError({
+    #             'start_date': f"Нельзя создавать статус на прошедшую дату. Дата начала должна быть не раньше {today}."
+    #         })
+    #
+    #     # Проверка, что дата начала не раньше даты приема сотрудника
+    #     if self.employee_id:
+    #         from organization_management.apps.employees.models import Employee
+    #         try:
+    #             employee = Employee.objects.get(pk=self.employee_id)
+    #             if self.start_date < employee.hire_date:
+    #                 raise ValidationError({
+    #                     'start_date': f"Дата начала статуса не может быть раньше даты приема сотрудника ({employee.hire_date})."
+    #                 })
+    #         except Employee.DoesNotExist:
+    #             pass
+    #
+    #     # Статус "В строю" не должен иметь даты окончания
+    #     if self.status_type == self.StatusType.IN_SERVICE and self.end_date:
+    #         raise ValidationError({
+    #             'end_date': 'Статус "В строю" не должен иметь дату окончания.'
+    #         })
+    #
+    #     # Остальные статусы должны иметь дату окончания
+    #     if self.status_type != self.StatusType.IN_SERVICE and not self.end_date and self.state != self.StatusState.PLANNED:
+    #         raise ValidationError({
+    #             'end_date': 'Для данного типа статуса требуется указать дату окончания.'
+    #         })
+    #
+    #     # НОВАЯ ПРОВЕРКА: Для SECONDED_TO проверяем корректность related_division
+    #     if self.status_type == self.StatusType.SECONDED_TO:
+    #         if not self.related_division_id:
+    #             raise ValidationError({
+    #                 'related_division': 'Для статуса "Откомандирован" обязательно указать целевое подразделение.'
+    #             })
+    #
+    #         # Проверяем, что related_division НЕ совпадает с базовым подразделением сотрудника
+    #         if self.employee_id:
+    #             from organization_management.apps.employees.models import Employee
+    #             try:
+    #                 employee = Employee.objects.select_related('staff_unit__division').get(pk=self.employee_id)
+    #                 if hasattr(employee, 'staff_unit') and employee.staff_unit and employee.staff_unit.division:
+    #                     if employee.staff_unit.division.id == self.related_division_id:
+    #                         raise ValidationError({
+    #                             'related_division': 'Нельзя откомандировать сотрудника в его собственное подразделение. '
+    #                                                f'Сотрудник уже работает в "{employee.staff_unit.division.name}".'
+    #                         })
+    #             except Employee.DoesNotExist:
+    #                 pass
+    #
+    #     # Проверка максимальной длительности отпуска (по умолчанию 45 дней, настраивается)
+    #     if self.status_type == self.StatusType.VACATION and self.start_date and self.end_date:
+    #         max_vacation_days = getattr(settings, 'MAX_VACATION_DAYS', 45)
+    #         vacation_duration = (self.end_date - self.start_date).days + 1
+    #
+    #         if vacation_duration > max_vacation_days:
+    #             raise ValidationError({
+    #                 'end_date': f'Длительность непрерывного отпуска не может превышать {max_vacation_days} дней. '
+    #                            f'Текущая длительность: {vacation_duration} дней.'
+    #             })
+    #
+    #     # Проверка пересечений с другими активными статусами
+    #     # Запрещаем создавать пересекающиеся статусы для одного сотрудника
+    #     # ВАЖНО: Пропускаем проверку для завершенных статусов
+    #     if self.employee_id and self.start_date and self.state != self.StatusState.COMPLETED:
+    #         # Определяем конечную дату для проверки
+    #         check_end_date = self.end_date or timezone.now().date() + timedelta(days=36500)  # 100 лет в будущее
+    #
+    #         # Ищем пересекающиеся активные статусы, исключая текущий редактируемый статус
+    #         overlapping = EmployeeStatus.objects.filter(
+    #             employee_id=self.employee_id,
+    #             state__in=[self.StatusState.ACTIVE, self.StatusState.PLANNED]
+    #         )
+    #
+    #         # ВАЖНО: Исключаем текущий редактируемый статус из проверки
+    #         # Это позволяет редактировать существующие статусы без блокировки
+    #         if self.pk:
+    #             overlapping = overlapping.exclude(pk=self.pk)
+    #
+    #         for other_status in overlapping:
+    #             today = timezone.now().date()
+    #
+    #             # ИСКЛЮЧЕНИЕ 1: Разрешаем пересечение с "В строю" для запланированных статусов
+    #             # так как "В строю" будет автоматически завершен при активации нового статуса
+    #             # Также разрешаем создание "В строю" при наличии запланированных статусов
+    #             is_planned_status = self.start_date > today
+    #             is_other_planned = other_status.start_date > today
+    #             is_self_in_service = self.status_type == self.StatusType.IN_SERVICE
+    #             is_other_in_service = other_status.status_type == self.StatusType.IN_SERVICE
+    #
+    #             # Случай 1: Создаем запланированный статус, а есть активный "В строю"
+    #             if is_planned_status and is_other_in_service:
+    #                 continue
+    #
+    #             # Случай 2: Создаем "В строю", а есть запланированные статусы в будущем
+    #             # "В строю" будет автоматически завершен когда запланированный статус активируется
+    #             if is_self_in_service and is_other_planned:
+    #                 continue
+    #
+    #             # ИСКЛЮЧЕНИЕ 2: Разрешаем создание или редактирование статуса на сегодняшний день
+    #             # Это позволяет исправлять ошибки или менять статус на сегодня
+    #             # (например, сотрудник заболел в обед, нужно изменить его статус)
+    #             # При этом предыдущий статус будет автоматически завершен
+    #             is_status_today = self.start_date == today
+    #             is_other_status_today = other_status.start_date == today
+    #
+    #             if is_status_today and is_other_status_today:
+    #                 # Разрешаем создавать/редактировать статус на сегодня, который заменит существующий
+    #                 # Предыдущий статус нужно будет завершить при сохранении
+    #                 continue
+    #
+    #             # ИСКЛЮЧЕНИЕ 3: Разрешаем пересечение статусов прикомандирования друг с другом
+    #             # При прикомандировании создаются ДВА статуса одновременно (SECONDED_TO и SECONDED_FROM)
+    #             # для одного сотрудника, поэтому они должны мочь сосуществовать
+    #             is_self_secondment = self.status_type in [self.StatusType.SECONDED_TO, self.StatusType.SECONDED_FROM]
+    #             is_other_secondment = other_status.status_type in [self.StatusType.SECONDED_TO,
+    #                                                                self.StatusType.SECONDED_FROM]
+    #
+    #             # Если оба — прикомандирование, уже пропускаем
+    #             if is_self_secondment and is_other_secondment:
+    #                 continue
+    #
+    #             acting_div_id = getattr(self, '_acting_division_id', None)
+    #             print(acting_div_id, "acting_div_id99999")
+    #             # Если у сотрудника есть SECONDED_TO и мы — принимающее подразделение, не блокируем
+    #             if other_status.status_type == self.StatusType.SECONDED_TO \
+    #                     and other_status.related_division_id == acting_div_id:
+    #                 continue
+    #
+    #             # Если пересекаемся с SECONDED_FROM, и мы не исходное подразделение (т.е. acting_div_id != related_division),
+    #             # тоже пропускаем — это статус прикомандирования для принимающей стороны.
+    #             if other_status.status_type == self.StatusType.SECONDED_FROM \
+    #                     and acting_div_id and acting_div_id != other_status.related_division_id:
+    #                 continue
+    #
+    #             # НОВОЕ ПРАВИЛО: Если у сотрудника есть активный SECONDED_TO (откомандирован),
+    #             # запрещаем создавать любые другие статусы в его домашнем подразделении
+    #             if not is_self_secondment and other_status.status_type == self.StatusType.SECONDED_TO:
+    #                 raise ValidationError({
+    #                     'start_date': f'Невозможно создать статус "{self.get_status_type_display()}", '
+    #                                  f'так как сотрудник откомандирован в другое подразделение '
+    #                                  f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
+    #                                  f'Сначала завершите или отмените откомандирование.'
+    #                 })
+    #
+    #             # НОВОЕ ПРАВИЛО: Если создаём SECONDED_TO, а у сотрудника есть другие активные статусы,
+    #             # запрещаем (кроме IN_SERVICE который будет автоматически завершён)
+    #             if self.status_type == self.StatusType.SECONDED_TO and not is_other_secondment:
+    #                 if other_status.status_type != self.StatusType.IN_SERVICE:
+    #                     raise ValidationError({
+    #                         'start_date': f'Невозможно откомандировать сотрудника, так как у него есть '
+    #                                      f'активный статус "{other_status.get_status_type_display()}" '
+    #                                      f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
+    #                                      f'Сначала завершите или отмените этот статус.'
+    #                     })
+    #
+    #             # ВАЖНО: Для НОВЫХ статусов пропускаем проверку на пересечение
+    #             # так как метод save() автоматически завершит/отменит пересекающиеся статусы
+    #             # Проверку оставляем только для редактирования существующих статусов
+    #             if self.pk is not None:  # Только для существующих статусов
+    #                 other_end = other_status.end_date or timezone.now().date() + timedelta(days=36500)
+    #
+    #                 # Проверяем пересечение периодов
+    #                 if not (check_end_date < other_status.start_date or self.start_date > other_end):
+    #                     raise ValidationError({
+    #                         'start_date': f'Период статуса пересекается с существующим статусом '
+    #                                      f'"{other_status.get_status_type_display()}" '
+    #                                      f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
+    #                                      f'Для одного сотрудника не может быть пересекающихся активных статусов.'
+    #                     })
+
     def clean(self):
-        """Валидация модели"""
+        print(f"[clean] employee_id={self.employee_id}, status_type={self.status_type}, "
+              f"start={self.start_date}, end={self.end_date}, state={self.state}, pk={self.pk}")
+
         # Проверка корректности интервала дат
         if self.end_date and self.end_date < self.start_date:
-            raise ValidationError({
-                'end_date': "Дата окончания не может быть раньше даты начала."
-            })
+            print("[clean] end_date < start_date -> error")
+            raise ValidationError({'end_date': "Дата окончания не может быть раньше даты начала."})
 
         # Проверка фактической даты окончания
         if self.actual_end_date:
-            # Для досрочного завершения actual_end_date может быть раньше end_date - это нормально
-            # Проверяем только что actual_end_date не раньше start_date
             if self.actual_end_date < self.start_date:
-                raise ValidationError({
-                    'actual_end_date': "Фактическая дата окончания не может быть раньше даты начала."
-                })
-            # Убрали проверку actual_end_date > end_date, так как при автозавершении
-            # старых статусов actual_end_date специально ставится раньше end_date
+                print("[clean] actual_end_date < start_date -> error")
+                raise ValidationError(
+                    {'actual_end_date': "Фактическая дата окончания не может быть раньше даты начала."})
 
         # Проверка, что дата начала не в прошлом (только для новых статусов)
         today = timezone.now().date()
         if not self.pk and self.start_date and self.start_date < today:
+            print("[clean] start_date in past for new status -> error")
             raise ValidationError({
-                'start_date': f"Нельзя создавать статус на прошедшую дату. Дата начала должна быть не раньше {today}."
-            })
+                                      'start_date': f"Нельзя создавать статус на прошедшую дату. Дата начала должна быть не раньше {today}."})
 
         # Проверка, что дата начала не раньше даты приема сотрудника
         if self.employee_id:
@@ -167,157 +356,143 @@ class EmployeeStatus(models.Model):
             try:
                 employee = Employee.objects.get(pk=self.employee_id)
                 if self.start_date < employee.hire_date:
+                    print("[clean] start_date < hire_date -> error")
                     raise ValidationError({
-                        'start_date': f"Дата начала статуса не может быть раньше даты приема сотрудника ({employee.hire_date})."
-                    })
+                                              'start_date': f"Дата начала статуса не может быть раньше даты приема сотрудника ({employee.hire_date})."})
             except Employee.DoesNotExist:
                 pass
 
         # Статус "В строю" не должен иметь даты окончания
         if self.status_type == self.StatusType.IN_SERVICE and self.end_date:
-            raise ValidationError({
-                'end_date': 'Статус "В строю" не должен иметь дату окончания.'
-            })
+            print("[clean] IN_SERVICE with end_date -> error")
+            raise ValidationError({'end_date': 'Статус "В строю" не должен иметь дату окончания.'})
 
         # Остальные статусы должны иметь дату окончания
         if self.status_type != self.StatusType.IN_SERVICE and not self.end_date and self.state != self.StatusState.PLANNED:
-            raise ValidationError({
-                'end_date': 'Для данного типа статуса требуется указать дату окончания.'
-            })
+            print("[clean] non IN_SERVICE without end_date -> error")
+            raise ValidationError({'end_date': 'Для данного типа статуса требуется указать дату окончания.'})
 
         # НОВАЯ ПРОВЕРКА: Для SECONDED_TO проверяем корректность related_division
         if self.status_type == self.StatusType.SECONDED_TO:
             if not self.related_division_id:
-                raise ValidationError({
-                    'related_division': 'Для статуса "Откомандирован" обязательно указать целевое подразделение.'
-                })
-
-            # Проверяем, что related_division НЕ совпадает с базовым подразделением сотрудника
+                print("[clean] SECONDED_TO without related_division -> error")
+                raise ValidationError(
+                    {'related_division': 'Для статуса "Откомандирован" обязательно указать целевое подразделение.'})
             if self.employee_id:
                 from organization_management.apps.employees.models import Employee
                 try:
                     employee = Employee.objects.select_related('staff_unit__division').get(pk=self.employee_id)
                     if hasattr(employee, 'staff_unit') and employee.staff_unit and employee.staff_unit.division:
                         if employee.staff_unit.division.id == self.related_division_id:
+                            print("[clean] SECONDED_TO to own division -> error")
                             raise ValidationError({
-                                'related_division': 'Нельзя откомандировать сотрудника в его собственное подразделение. '
-                                                   f'Сотрудник уже работает в "{employee.staff_unit.division.name}".'
-                            })
+                                                      'related_division': 'Нельзя откомандировать сотрудника в его собственное подразделение. '
+                                                                          f'Сотрудник уже работает в "{employee.staff_unit.division.name}".'})
                 except Employee.DoesNotExist:
                     pass
 
-        # Проверка максимальной длительности отпуска (по умолчанию 45 дней, настраивается)
+        # Проверка максимальной длительности отпуска
         if self.status_type == self.StatusType.VACATION and self.start_date and self.end_date:
             max_vacation_days = getattr(settings, 'MAX_VACATION_DAYS', 45)
             vacation_duration = (self.end_date - self.start_date).days + 1
-
             if vacation_duration > max_vacation_days:
-                raise ValidationError({
-                    'end_date': f'Длительность непрерывного отпуска не может превышать {max_vacation_days} дней. '
-                               f'Текущая длительность: {vacation_duration} дней.'
-                })
+                print("[clean] vacation too long -> error")
+                raise ValidationError(
+                    {'end_date': f'Длительность непрерывного отпуска не может превышать {max_vacation_days} дней. '
+                                 f'Текущая длительность: {vacation_duration} дней.'})
 
-        # Проверка пересечений с другими активными статусами
-        # Запрещаем создавать пересекающиеся статусы для одного сотрудника
-        # ВАЖНО: Пропускаем проверку для завершенных статусов
-        if self.employee_id and self.start_date and self.state != self.StatusState.COMPLETED:
-            # Определяем конечную дату для проверки
-            check_end_date = self.end_date or timezone.now().date() + timedelta(days=36500)  # 100 лет в будущее
-
-            # Ищем пересекающиеся активные статусы, исключая текущий редактируемый статус
+        # Проверка пересечений
+        # Пропускаем проверку для завершенных и отмененных статусов
+        if self.employee_id and self.start_date and self.state not in [self.StatusState.COMPLETED, self.StatusState.CANCELLED]:
+            check_end_date = self.end_date or timezone.now().date() + timedelta(days=36500)
             overlapping = EmployeeStatus.objects.filter(
                 employee_id=self.employee_id,
                 state__in=[self.StatusState.ACTIVE, self.StatusState.PLANNED]
             )
-            
-            # ВАЖНО: Исключаем текущий редактируемый статус из проверки
-            # Это позволяет редактировать существующие статусы без блокировки
             if self.pk:
                 overlapping = overlapping.exclude(pk=self.pk)
 
-            for other_status in overlapping:
-                today = timezone.now().date()
+            acting_div_id = getattr(self, '_acting_division_id', None)
+            print(f"[clean] acting_div_id={acting_div_id}, overlapping count={overlapping.count()}")
 
-                # ИСКЛЮЧЕНИЕ 1: Разрешаем пересечение с "В строю" для запланированных статусов
-                # так как "В строю" будет автоматически завершен при активации нового статуса
-                # Также разрешаем создание "В строю" при наличии запланированных статусов
+            for other_status in overlapping:
+                print(f"[clean] compare with status id={other_status.id}, type={other_status.status_type}, "
+                      f"start={other_status.start_date}, end={other_status.end_date}, state={other_status.state}, "
+                      f"related_div={other_status.related_division_id}")
+
                 is_planned_status = self.start_date > today
                 is_other_planned = other_status.start_date > today
                 is_self_in_service = self.status_type == self.StatusType.IN_SERVICE
                 is_other_in_service = other_status.status_type == self.StatusType.IN_SERVICE
 
-                # Случай 1: Создаем запланированный статус, а есть активный "В строю"
                 if is_planned_status and is_other_in_service:
+                    print("[clean] skip: planned + other IN_SERVICE")
                     continue
-
-                # Случай 2: Создаем "В строю", а есть запланированные статусы в будущем
-                # "В строю" будет автоматически завершен когда запланированный статус активируется
                 if is_self_in_service and is_other_planned:
+                    print("[clean] skip: self IN_SERVICE + other planned")
                     continue
 
-                # ИСКЛЮЧЕНИЕ 2: Разрешаем создание или редактирование статуса на сегодняшний день
-                # Это позволяет исправлять ошибки или менять статус на сегодня
-                # (например, сотрудник заболел в обед, нужно изменить его статус)
-                # При этом предыдущий статус будет автоматически завершен
                 is_status_today = self.start_date == today
                 is_other_status_today = other_status.start_date == today
-
                 if is_status_today and is_other_status_today:
-                    # Разрешаем создавать/редактировать статус на сегодня, который заменит существующий
-                    # Предыдущий статус нужно будет завершить при сохранении
+                    print("[clean] skip: both start today")
                     continue
 
-                # ИСКЛЮЧЕНИЕ 3: Разрешаем пересечение статусов прикомандирования друг с другом
-                # При прикомандировании создаются ДВА статуса одновременно (SECONDED_TO и SECONDED_FROM)
-                # для одного сотрудника, поэтому они должны мочь сосуществовать
                 is_self_secondment = self.status_type in [self.StatusType.SECONDED_TO, self.StatusType.SECONDED_FROM]
-                is_other_secondment = other_status.status_type in [self.StatusType.SECONDED_TO, self.StatusType.SECONDED_FROM]
+                is_other_secondment = other_status.status_type in [self.StatusType.SECONDED_TO,
+                                                                   self.StatusType.SECONDED_FROM]
 
                 if is_self_secondment and is_other_secondment:
-                    # Разрешаем пересечение статусов прикомандирования
+                    print("[clean] skip: both secondment")
                     continue
 
-                # ИСКЛЮЧЕНИЕ 4: Статусы прикомандирования
-                # Разрешаем пересечение ТОЛЬКО между SECONDED_TO и SECONDED_FROM (они создаются парой)
-                if is_self_secondment and is_other_secondment:
-                    # Разрешаем пересечение только между статусами прикомандирования друг с другом
+                # Исключение для принимающей стороны
+                # Проверяем что acting_division совпадает с related_division ИЛИ является его родителем
+                if other_status.status_type == self.StatusType.SECONDED_TO and other_status.related_division_id and acting_div_id:
+                    from organization_management.apps.divisions.models import Division
+                    try:
+                        related_div = Division.objects.get(id=other_status.related_division_id)
+                        acting_div = Division.objects.get(id=acting_div_id)
+                        # Проверяем что related_div находится в зоне acting_div
+                        allowed_divisions = acting_div.get_descendants(include_self=True)
+                        if related_div.id in allowed_divisions.values_list('id', flat=True):
+                            print(f"[clean] skip: seconded_to and related_div ({related_div.id}) in acting_div ({acting_div.id}) zone")
+                            continue
+                    except Division.DoesNotExist:
+                        pass
+                if other_status.status_type == self.StatusType.SECONDED_FROM and acting_div_id and acting_div_id != other_status.related_division_id:
+                    print("[clean] skip: seconded_from and acting_div != related (принимающая сторона)")
                     continue
 
-                # НОВОЕ ПРАВИЛО: Если у сотрудника есть активный SECONDED_TO (откомандирован),
-                # запрещаем создавать любые другие статусы в его домашнем подразделении
                 if not is_self_secondment and other_status.status_type == self.StatusType.SECONDED_TO:
-                    raise ValidationError({
-                        'start_date': f'Невозможно создать статус "{self.get_status_type_display()}", '
-                                     f'так как сотрудник откомандирован в другое подразделение '
-                                     f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
-                                     f'Сначала завершите или отмените откомандирование.'
-                    })
+                    print("[clean] error: other has SECONDED_TO and self not secondment")
+                    raise ValidationError(
+                        {'start_date': f'Невозможно создать статус "{self.get_status_type_display()}", '
+                                       f'так как сотрудник откомандирован в другое подразделение '
+                                       f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
+                                       f'Сначала завершите или отмените откомандирование.'})
 
-                # НОВОЕ ПРАВИЛО: Если создаём SECONDED_TO, а у сотрудника есть другие активные статусы,
-                # запрещаем (кроме IN_SERVICE который будет автоматически завершён)
                 if self.status_type == self.StatusType.SECONDED_TO and not is_other_secondment:
-                    if other_status.status_type != self.StatusType.IN_SERVICE:
-                        raise ValidationError({
-                            'start_date': f'Невозможно откомандировать сотрудника, так как у него есть '
-                                         f'активный статус "{other_status.get_status_type_display()}" '
-                                         f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
-                                         f'Сначала завершите или отмените этот статус.'
-                        })
+                    # Разрешаем создание SECONDED_TO если другой статус:
+                    # 1) IN_SERVICE (будет автоматически завершен)
+                    # 2) PLANNED (будет автоматически отменен в save())
+                    if other_status.status_type != self.StatusType.IN_SERVICE and other_status.state != self.StatusState.PLANNED:
+                        print("[clean] error: creating SECONDED_TO but other active status exists")
+                        raise ValidationError(
+                            {'start_date': f'Невозможно откомандировать сотрудника, так как у него есть '
+                                           f'активный статус "{other_status.get_status_type_display()}" '
+                                           f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
+                                           f'Сначала завершите или отмените этот статус.'})
 
-                # ВАЖНО: Для НОВЫХ статусов пропускаем проверку на пересечение
-                # так как метод save() автоматически завершит/отменит пересекающиеся статусы
-                # Проверку оставляем только для редактирования существующих статусов
-                if self.pk is not None:  # Только для существующих статусов
+                if self.pk is not None:
                     other_end = other_status.end_date or timezone.now().date() + timedelta(days=36500)
-
-                    # Проверяем пересечение периодов
                     if not (check_end_date < other_status.start_date or self.start_date > other_end):
-                        raise ValidationError({
-                            'start_date': f'Период статуса пересекается с существующим статусом '
-                                         f'"{other_status.get_status_type_display()}" '
-                                         f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
-                                         f'Для одного сотрудника не может быть пересекающихся активных статусов.'
-                        })
+                        print("[clean] error: final overlap check failed")
+                        raise ValidationError({'start_date': f'Период статуса пересекается с существующим статусом '
+                                                             f'"{other_status.get_status_type_display()}" '
+                                                             f'({other_status.start_date} - {other_status.end_date or "не указано"}). '
+                                                             f'Для одного сотрудника не может быть пересекающихся активных статусов.'})
+        print("[clean] passed")
 
     def save(self, *args, **kwargs):
         """Переопределенный метод сохранения"""
@@ -356,6 +531,11 @@ class EmployeeStatus(models.Model):
                 # Определяем конечную дату для проверки пересечения
                 check_end_date = self.end_date or timezone.now().date() + timedelta(days=36500)
 
+                # ВАЖНО: Если новый статус ЗАПЛАНИРОВАННЫЙ (в будущем),
+                # то НЕ завершаем активные статусы (особенно IN_SERVICE)
+                # Активные статусы будут завершены автоматически когда запланированный статус активируется
+                is_new_status_planned = self.start_date > today
+
                 # Находим пересекающиеся статусы
                 overlapping = EmployeeStatus.objects.filter(
                     employee_id=self.employee_id,
@@ -376,7 +556,14 @@ class EmployeeStatus(models.Model):
                             other_status.early_termination_reason = f"Автоматически отменен из-за создания нового статуса '{self.status_type}' на {self.start_date}"
                             other_status.save()
                         elif other_status.state == self.StatusState.ACTIVE:
-                            # Завершаем активный статус
+                            # ИСПРАВЛЕНИЕ БАГА: Если новый статус запланированный,
+                            # НЕ завершаем активные статусы (особенно IN_SERVICE)
+                            if is_new_status_planned:
+                                # Пропускаем завершение активных статусов
+                                # Они будут завершены автоматически в apply_planned_statuses()
+                                continue
+
+                            # Завершаем активный статус только если новый статус УЖЕ начался
                             # Завершаем днем раньше начала нового статуса
                             termination_date = max(
                                 other_status.start_date,

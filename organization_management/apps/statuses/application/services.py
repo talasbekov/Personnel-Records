@@ -33,7 +33,9 @@ class StatusApplicationService:
         comment: str = "",
         location: str = "",
         related_division_id: Optional[int] = None,
-        user=None
+        user=None,
+        acting_division_id: Optional[int] = None,
+        _allow_secondment: bool = False  # Внутренний флаг для системы одобрений
     ) -> EmployeeStatus:
         """
         Создание нового статуса сотрудника
@@ -47,10 +49,21 @@ class StatusApplicationService:
             location: Место (для командировки/учебы)
             related_division_id: ID связанного подразделения (для прикомандирования)
             user: Пользователь, создавший статус
+            _allow_secondment: Внутренний флаг (не использовать в API!)
 
         Returns:
             EmployeeStatus: Созданный статус
         """
+        # БЛОКИРОВКА: Статусы прикомандирования можно создавать ТОЛЬКО через систему одобрений
+        # Это предотвращает обход процесса согласования
+        if status_type in [EmployeeStatus.StatusType.SECONDED_TO, EmployeeStatus.StatusType.SECONDED_FROM]:
+            if not _allow_secondment:
+                raise ValidationError(
+                    'Статусы прикомандирования нельзя создавать напрямую. '
+                    'Используйте API заявок на прикомандирование: '
+                    'POST /api/secondments/secondment-requests/'
+                )
+
         try:
             employee = Employee.objects.get(pk=employee_id)
         except Employee.DoesNotExist:
@@ -83,7 +96,9 @@ class StatusApplicationService:
             ).first()
 
             if active_secondment:
-                if active_secondment.status_type == EmployeeStatus.StatusType.SECONDED_TO:
+                if (active_secondment.status_type == EmployeeStatus.StatusType.SECONDED_TO and
+                        active_secondment.related_division_id and
+                        active_secondment.related_division_id != acting_division_id):
                     # Сотрудник откомандирован - запрещаем локальные статусы
                     raise ValidationError(
                         f'Сотрудник откомандирован в подразделение "{active_secondment.related_division}" '
@@ -123,6 +138,12 @@ class StatusApplicationService:
                     comment=f"Автоматически завершен при создании нового статуса"
                 )
 
+        # Определяем state перед созданием объекта
+        if start_date > today:
+            initial_state = EmployeeStatus.StatusState.PLANNED
+        else:
+            initial_state = EmployeeStatus.StatusState.ACTIVE
+
         status = EmployeeStatus(
             employee=employee,
             status_type=status_type,
@@ -134,8 +155,10 @@ class StatusApplicationService:
             created_by=user,
             actual_end_date=None,  # Явно устанавливаем None при создании
             early_termination_reason='',  # Пустая строка по умолчанию
-            state=None  # Явно None, чтобы метод save() определил состояние по датам
+            state=initial_state  # Устанавливаем state для валидации
         )
+        status._acting_division_id = acting_division_id
+        status.full_clean()  # ВАЖНО: вызываем валидацию перед сохранением
         status.save()
 
         # Создаем запись в истории изменений

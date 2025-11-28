@@ -164,6 +164,11 @@ class EmployeeStatusCreateSerializer(serializers.ModelSerializer):
             'employee', 'status_type', 'start_date', 'end_date',
             'comment', 'location', 'related_division'
         ]
+        extra_kwargs = {
+            'status_type': {'required': True},
+            'employee': {'required': True},
+            'start_date': {'required': True}
+        }
 
     def validate(self, attrs):
         """Валидация данных"""
